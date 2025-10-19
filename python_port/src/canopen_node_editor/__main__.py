@@ -1,0 +1,9 @@
+"""Module executed when running ``python -m canopen_node_editor``."""
+
+from __future__ import annotations
+
+from .app import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

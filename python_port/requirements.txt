@@ -1,0 +1,7 @@
+pyside6
+qt-material
+pydantic
+pytest
+pytest-qt
+platformdirs
+jinja2

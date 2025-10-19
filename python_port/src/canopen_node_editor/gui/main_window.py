@@ -1,0 +1,354 @@
+"""Main window composition for the CANopenNode Editor GUI."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable, Dict, Iterable, List
+
+from PySide6.QtCore import QByteArray, QLocale, Qt
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QDockWidget,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QStatusBar,
+    QTabWidget,
+)
+
+from ..services.network import DeviceSession, NetworkManager
+from ..services.profiles import ProfileRepository
+from ..services.settings import SettingsManager
+from .widgets.command_palette import Command, CommandPalette
+from .widgets.device_page import DeviceEditorPage
+from .widgets.object_dictionary import ObjectDictionaryWidget
+from .widgets.pdo_editor import PDOEditorWidget
+from .widgets.property_inspector import PropertyInspectorWidget
+from .widgets.report_viewer import ReportViewerWidget
+
+
+class EditorMainWindow(QMainWindow):
+    """Main window providing menus, docks, and the device workspace."""
+
+    def __init__(
+        self,
+        network: NetworkManager,
+        settings: SettingsManager,
+        profile_repository: ProfileRepository | None = None,
+        toggle_theme: Callable[[], None] | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._network = network
+        self._settings = settings
+        self._profile_repository = profile_repository or ProfileRepository([])
+        self._toggle_theme = toggle_theme
+        self._palette: CommandPalette | None = None
+
+        self.setWindowTitle(self.tr("CANopenNode Editor"))
+        self.resize(1280, 720)
+
+        self._tabs = QTabWidget(self)
+        self._tabs.setTabsClosable(True)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        self._tabs.tabCloseRequested.connect(self._close_tab)
+        self.setCentralWidget(self._tabs)
+
+        self._object_dock = QDockWidget(self.tr("Object Dictionary"), self)
+        self._object_view = ObjectDictionaryWidget(self._object_dock)
+        self._object_dock.setWidget(self._object_view)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self._object_dock)
+
+        self._property_dock = QDockWidget(self.tr("Properties"), self)
+        self._property_view = PropertyInspectorWidget(self._property_dock)
+        self._property_dock.setWidget(self._property_view)
+        self.addDockWidget(Qt.RightDockWidgetArea, self._property_dock)
+
+        self._pdo_dock = QDockWidget(self.tr("PDO Editor"), self)
+        self._pdo_view = PDOEditorWidget(self._pdo_dock)
+        self._pdo_dock.setWidget(self._pdo_view)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self._pdo_dock)
+
+        self._report_dock = QDockWidget(self.tr("Validation Report"), self)
+        self._report_view = ReportViewerWidget(self._report_dock)
+        self._report_dock.setWidget(self._report_view)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self._report_dock)
+        self.tabifyDockWidget(self._pdo_dock, self._report_dock)
+
+        self._pages: Dict[DeviceEditorPage, DeviceSession] = {}
+
+        self._status = QStatusBar(self)
+        self.setStatusBar(self._status)
+
+        self._create_actions()
+        self._create_menus()
+        self._register_signals()
+        self._restore_window_state()
+        self._refresh_recent_files()
+        self._object_view.selectionChanged.connect(self._property_view.display)
+
+    # ------------------------------------------------------------------
+    def _create_actions(self) -> None:
+        self._action_open = QAction(self.tr("&Open Device…"), self)
+        self._action_open.setShortcut(QKeySequence.StandardKey.Open)
+        self._action_open.triggered.connect(self._open_device_dialog)
+
+        self._action_recent: list[QAction] = []
+
+        self._action_export = QAction(self.tr("Export CANopenNode Sources…"), self)
+        self._action_export.setShortcut("Ctrl+E")
+        self._action_export.triggered.connect(self._export_current_session)
+
+        self._action_close = QAction(self.tr("Close Device"), self)
+        self._action_close.setShortcut(QKeySequence.StandardKey.Close)
+        self._action_close.triggered.connect(self._close_current_tab)
+
+        self._action_exit = QAction(self.tr("Exit"), self)
+        self._action_exit.setShortcut(QKeySequence.StandardKey.Quit)
+        self._action_exit.triggered.connect(self.close)
+
+        self._action_palette = QAction(self.tr("Command Palette"), self)
+        self._action_palette.setShortcut("Ctrl+K")
+        self._action_palette.triggered.connect(self._show_command_palette)
+
+        self._action_toggle_theme = QAction(self.tr("Toggle Dark Mode"), self)
+        self._action_toggle_theme.triggered.connect(self._toggle_theme_action)
+
+        self._action_about = QAction(self.tr("About"), self)
+        self._action_about.triggered.connect(self._show_about_dialog)
+
+    def _create_menus(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu(self.tr("&File"))
+        file_menu.addAction(self._action_open)
+        self._recent_menu = file_menu.addMenu(self.tr("Open &Recent"))
+        file_menu.addSeparator()
+        file_menu.addAction(self._action_export)
+        file_menu.addSeparator()
+        file_menu.addAction(self._action_close)
+        file_menu.addSeparator()
+        file_menu.addAction(self._action_exit)
+
+        view_menu = menu_bar.addMenu(self.tr("&View"))
+        view_menu.addAction(self._object_dock.toggleViewAction())
+        view_menu.addAction(self._property_dock.toggleViewAction())
+        view_menu.addAction(self._pdo_dock.toggleViewAction())
+        view_menu.addAction(self._report_dock.toggleViewAction())
+        view_menu.addSeparator()
+        view_menu.addAction(self._action_toggle_theme)
+
+        tools_menu = menu_bar.addMenu(self.tr("&Tools"))
+        tools_menu.addAction(self._action_palette)
+
+        profiles_menu = menu_bar.addMenu(self.tr("&Profiles"))
+        profiles_menu.aboutToShow.connect(lambda m=profiles_menu: self._populate_profiles_menu(m))
+
+        help_menu = menu_bar.addMenu(self.tr("&Help"))
+        help_menu.addAction(self._action_about)
+
+    def _register_signals(self) -> None:
+        self._tabs.currentChanged.connect(lambda _: self._update_context_widgets())
+
+    # ------------------------------------------------------------------
+    def _restore_window_state(self) -> None:
+        prefs = self._settings.load()
+        state = prefs.window_state
+        geometry = state.get("geometry")
+        dock_state = state.get("dock_state")
+        if geometry:
+            try:
+                self.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))
+            except Exception:
+                pass
+        if dock_state:
+            try:
+                self.restoreState(QByteArray.fromBase64(dock_state.encode("ascii")))
+            except Exception:
+                pass
+
+    def _save_window_state(self) -> None:
+        geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        dock_state = bytes(self.saveState().toBase64()).decode("ascii")
+        locale = QLocale.system().name()
+        self._settings.update_preferences(window_state={
+            "geometry": geometry,
+            "dock_state": dock_state,
+            "locale": locale,
+        })
+        self._settings.save()
+
+    # ------------------------------------------------------------------
+    def _open_device_dialog(self) -> None:
+        directory = self._settings.storage_path.parent
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Open Device"),
+            str(directory),
+            self.tr("Device Descriptions (*.eds *.xdd *.xdc)"),
+        )
+        if not path:
+            return
+        try:
+            session = self._network.open_device(Path(path))
+        except Exception as exc:
+            QMessageBox.critical(self, self.tr("Failed to open device"), str(exc))
+            return
+        self._settings.add_recent_file(Path(path))
+        self._settings.save()
+        self._refresh_recent_files()
+        self._add_session(session)
+        self._status.showMessage(self.tr("Loaded {name}").format(name=session.identifier), 5000)
+
+    def _add_session(self, session: DeviceSession) -> None:
+        page = DeviceEditorPage(session.device, self)
+        index = self._tabs.addTab(page, session.identifier)
+        self._pages[page] = session
+        self._tabs.setCurrentIndex(index)
+        self._update_context_widgets()
+
+    def add_session(self, session: DeviceSession) -> None:
+        """Public helper used by tests to inject sessions."""
+        self._add_session(session)
+
+    def _close_current_tab(self) -> None:
+        index = self._tabs.currentIndex()
+        if index >= 0:
+            self._close_tab(index)
+
+    def _close_tab(self, index: int) -> None:
+        widget = self._tabs.widget(index)
+        page = widget if isinstance(widget, DeviceEditorPage) else None
+        session = self._pages.pop(page, None) if page else None
+        if session is not None:
+            self._network.close_device(session.identifier)
+        self._tabs.removeTab(index)
+        self._update_context_widgets()
+
+    def _export_current_session(self) -> None:
+        index = self._tabs.currentIndex()
+        if index < 0:
+            return
+        widget = self._tabs.currentWidget()
+        page = widget if isinstance(widget, DeviceEditorPage) else None
+        session = self._pages.get(page) if page else None
+        if session is None:
+            return
+        session_id = session.identifier
+        output_dir = QFileDialog.getExistingDirectory(self, self.tr("Select Output Directory"))
+        if not output_dir:
+            return
+        try:
+            exports = self._network.export_device(session_id, Path(output_dir))
+        except Exception as exc:
+            QMessageBox.critical(self, self.tr("Export failed"), str(exc))
+            return
+        names = ", ".join(sorted(exports))
+        self._status.showMessage(self.tr("Exported: {files}").format(files=names), 5000)
+
+    def _on_tab_changed(self, index: int) -> None:
+        self._update_context_widgets()
+
+    def _update_context_widgets(self) -> None:
+        widget = self._tabs.currentWidget()
+        page = widget if isinstance(widget, DeviceEditorPage) else None
+        if page is None:
+            self._object_view.set_device(None)
+            self._property_view.display(None)
+            self._pdo_view.set_device(None)
+            self._report_view.set_report(None)
+            return
+        self._object_view.set_device(page.device)
+        self._object_view.select_first_row()
+        self._pdo_view.set_device(page.device)
+        self._report_view.set_report(page.device, page.issues)
+        self._status.showMessage(self.tr("Issues: {count}").format(count=len(page.issues)), 3000)
+
+    def _refresh_recent_files(self) -> None:
+        for action in self._action_recent:
+            self._recent_menu.removeAction(action)
+        self._action_recent.clear()
+
+        prefs = self._settings.load()
+        for path in prefs.recent_files:
+            action = QAction(Path(path).name, self)
+            action.setData(path)
+            action.triggered.connect(lambda checked=False, p=path: self._open_recent_file(p))
+            self._recent_menu.addAction(action)
+            self._action_recent.append(action)
+
+        if not self._action_recent:
+            placeholder = QAction(self.tr("No recent files"), self)
+            placeholder.setEnabled(False)
+            self._recent_menu.addAction(placeholder)
+            self._action_recent.append(placeholder)
+
+    def _open_recent_file(self, path: str) -> None:
+        try:
+            session = self._network.open_device(Path(path))
+        except Exception as exc:
+            QMessageBox.warning(self, self.tr("Unable to open"), str(exc))
+            return
+        self._add_session(session)
+
+    def _populate_profiles_menu(self, menu: QMenu) -> None:
+        menu.clear()
+        profiles = self._profile_repository.discover()
+        if not profiles:
+            placeholder = QAction(self.tr("No profiles found"), self)
+            placeholder.setEnabled(False)
+            menu.addAction(placeholder)
+            return
+        for profile in profiles:
+            action = QAction(profile.name, self)
+            action.setData(str(profile.path))
+            action.triggered.connect(lambda checked=False, p=profile.path: self._open_profile(p))
+            menu.addAction(action)
+
+    def _open_profile(self, path: Path) -> None:
+        try:
+            session = self._network.open_device(path)
+        except Exception as exc:
+            QMessageBox.warning(self, self.tr("Unable to open profile"), str(exc))
+            return
+        self._add_session(session)
+
+    def _show_command_palette(self) -> None:
+        commands = self._default_commands()
+        if self._palette is None:
+            self._palette = CommandPalette(commands, self)
+        else:
+            self._palette.set_commands(commands)
+        self._palette.reset()
+        self._palette.open()
+
+    def _default_commands(self) -> List[Command]:
+        commands = [
+            Command(self.tr("Open Device"), self._open_device_dialog, shortcut="Ctrl+O"),
+            Command(self.tr("Export CANopenNode Sources"), self._export_current_session, shortcut="Ctrl+E"),
+            Command(self.tr("Toggle Dark Mode"), self._toggle_theme_action, shortcut="Ctrl+Shift+L"),
+            Command(self.tr("Show Validation Report"), self._focus_report_dock),
+        ]
+        return commands
+
+    def _focus_report_dock(self) -> None:
+        self._report_dock.raise_()
+        self._report_dock.activateWindow()
+
+    def _toggle_theme_action(self) -> None:
+        if self._toggle_theme is not None:
+            self._toggle_theme()
+
+    def _show_about_dialog(self) -> None:
+        QMessageBox.information(
+            self,
+            self.tr("About CANopenNode Editor"),
+            self.tr(
+                "<p><strong>CANopenNode Editor</strong><br/>"
+                "Modern Python port of the legacy editor with CANopenNode export support."),
+        )
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._save_window_state()
+        super().closeEvent(event)

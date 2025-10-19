@@ -1,0 +1,56 @@
+[FileInfo]
+FileName=demo_device.eds
+FileVersion=1
+FileRevision=0
+EDSVersion=4.0
+Description=Demo device for parser tests
+CreationTime=12:00
+CreationDate=2023-01-01
+CreatedBy=python-port
+
+[DeviceInfo]
+VendorName=OpenAI Automation
+VendorNumber=0x1234
+ProductName=Demo Device
+ProductNumber=0x0001
+RevisionNumber=0x00000001
+OrderCode=DEMO-1
+
+[1000]
+ParameterName=Device Type
+ObjectType=VAR
+DataType=UNSIGNED32
+AccessType=ro
+DefaultValue=0x00000000
+
+[1001]
+ParameterName=Error Register
+ObjectType=VAR
+DataType=UNSIGNED8
+AccessType=ro
+DefaultValue=0
+
+[1600]
+ParameterName=TPDO Mapping
+ObjectType=RECORD
+SubNumber=3
+
+[1600sub0]
+ParameterName=Number of mapped objects
+DataType=UNSIGNED8
+AccessType=rw
+DefaultValue=0
+LowLimit=0
+HighLimit=8
+
+[1600sub1]
+ParameterName=Mapped object 1
+DataType=UNSIGNED32
+AccessType=rw
+DefaultValue=0
+
+[1600sub2]
+ParameterName=Mapped object 2
+DataType=UNSIGNED32
+AccessType=rw
+DefaultValue=0
