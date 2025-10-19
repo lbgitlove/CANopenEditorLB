@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -13,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...model import Device, ObjectEntry, SubObject
+from ...model import Device, ObjectEntry, PDOMapping, SubObject
 
 
 class PDOEditorWidget(QWidget):
@@ -21,6 +23,8 @@ class PDOEditorWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._device: Device | None = None
+        self._field_role = Qt.UserRole + 1
         (
             tpdo_section,
             self._tpdo_comm,
@@ -40,9 +44,22 @@ class PDOEditorWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(splitter)
 
+        for table in (
+            self._tpdo_comm,
+            self._tpdo_mapping,
+            self._rpdo_comm,
+            self._rpdo_mapping,
+        ):
+            self._configure_table(table)
+
     def set_device(self, device: Device | None) -> None:
-        self._populate_mapping_table(self._tpdo_mapping, device, include="TRANSMIT")
-        self._populate_mapping_table(self._rpdo_mapping, device, include="RECEIVE")
+        self._device = device
+        self._populate_mapping_table(
+            self._tpdo_mapping, device, include=PDOMapping.TPDO
+        )
+        self._populate_mapping_table(
+            self._rpdo_mapping, device, include=PDOMapping.RPDO
+        )
         self._populate_communication_table(
             self._tpdo_comm, device, self._is_tpdo_communication
         )
@@ -94,7 +111,6 @@ class PDOEditorWidget(QWidget):
             ]
         )
         table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectRows)
         header = table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -104,22 +120,34 @@ class PDOEditorWidget(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         return table
 
+    def _configure_table(self, table: QTableWidget) -> None:
+        triggers = (
+            QTableWidget.DoubleClicked
+            | QTableWidget.EditKeyPressed
+            | QTableWidget.SelectedClicked
+        )
+        table.setEditTriggers(triggers)
+        table.itemChanged.connect(partial(self._on_table_item_changed, table))
+
     def _populate_mapping_table(
-        self, table: QTableWidget, device: Device | None, include: str
+        self, table: QTableWidget, device: Device | None, include: PDOMapping
     ) -> None:
+        table.blockSignals(True)
         table.setRowCount(0)
         if device is None:
+            table.blockSignals(False)
             return
 
         entries: list[tuple[ObjectEntry, SubObject | None]] = []
         for entry in device.all_entries():
-            if entry.pdo_mapping and include in entry.pdo_mapping.name:
+            if entry.pdo_mapping and entry.pdo_mapping == include:
                 entries.append((entry, None))
             for sub in entry.sub_objects.values():
-                if sub.pdo_mapping and include in sub.pdo_mapping.name:
+                if sub.pdo_mapping and sub.pdo_mapping == include:
                     entries.append((entry, sub))
 
         self._fill_rows(table, entries)
+        table.blockSignals(False)
 
     def _populate_communication_table(
         self,
@@ -127,8 +155,10 @@ class PDOEditorWidget(QWidget):
         device: Device | None,
         predicate,
     ) -> None:
+        table.blockSignals(True)
         table.setRowCount(0)
         if device is None:
+            table.blockSignals(False)
             return
 
         entries: list[tuple[ObjectEntry, SubObject | None]] = []
@@ -142,10 +172,12 @@ class PDOEditorWidget(QWidget):
                 entries.append((entry, None))
 
         self._fill_rows(table, entries)
+        table.blockSignals(False)
 
     def _fill_rows(
         self, table: QTableWidget, entries: list[tuple[ObjectEntry, SubObject | None]]
     ) -> None:
+        table.blockSignals(True)
         table.setRowCount(len(entries))
         for row, (entry, sub) in enumerate(entries):
             index_item = QTableWidgetItem(f"0x{entry.index:04X}")
@@ -155,11 +187,22 @@ class PDOEditorWidget(QWidget):
             value_item = QTableWidgetItem(self._value_text(entry, sub))
             default_item = QTableWidgetItem(self._default_text(entry, sub))
 
-            for column, item in enumerate(
-                [index_item, subindex_item, name_item, value_item, default_item]
-            ):
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            columns = [
+                (index_item, None),
+                (subindex_item, None),
+                (name_item, "name"),
+                (value_item, "value"),
+                (default_item, "default"),
+            ]
+
+            for column, (item, field) in enumerate(columns):
+                if field is None:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                else:
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    item.setData(self._field_role, (entry, sub, field))
                 table.setItem(row, column, item)
+        table.blockSignals(False)
 
     def _value_text(self, entry: ObjectEntry, sub: SubObject | None) -> str:
         if sub and sub.value:
@@ -194,3 +237,12 @@ class PDOEditorWidget(QWidget):
     @staticmethod
     def _is_tpdo_communication(index: int) -> bool:
         return 0x1800 <= index <= 0x19FF
+
+    def _on_table_item_changed(self, table: QTableWidget, item: QTableWidgetItem) -> None:
+        payload = item.data(self._field_role)
+        if not isinstance(payload, tuple) or len(payload) != 3:
+            return
+        entry, sub, field = payload
+        text = item.text().strip()
+        target = sub or entry
+        setattr(target, field, text or None)
