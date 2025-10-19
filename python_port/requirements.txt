@@ -1,7 +1,3 @@
-pyside6
-qt-material
-pydantic
+-e .
 pytest
 pytest-qt
-platformdirs
-jinja2

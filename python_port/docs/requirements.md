@@ -76,13 +76,14 @@ python_port/
 ```
 
 ## 7. Dependencies (initial)
-The following packages must appear in `requirements.txt` and be kept up to date as the implementation evolves:
+Runtime dependencies are declared in `setup.cfg` so that installing the project
+automatically provides the required libraries:
 - `pyside6`
 - `qt-material` (optional modern theming)
 - `pydantic` (data model validation)
-- `pytest`
-- `pytest-qt`
 - `platformdirs` (user configuration directories)
 - `jinja2` (HTML reporting templates)
 
-Additional dependencies should be appended with rationale during development.
+The `requirements.txt` file retains the editable install (`-e .`) alongside the
+test tooling (`pytest`, `pytest-qt`) to streamline developer onboarding. Update
+both configuration files when adding or removing dependencies.

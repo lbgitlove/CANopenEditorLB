@@ -70,6 +70,7 @@ The Qt application now provides a tabbed workspace with dockable object dictiona
    - Author user manual and developer setup docs within `python_port/docs/`.
    - Provide migration notes for existing users.
 4. **Packaging & Distribution**
+   - Package project with editable install support to ensure ``python -m canopen_node_editor`` works in fresh environments.
    - Create installers/binaries for Windows/macOS/Linux as needed (PyInstaller/Briefcase).
    - Publish versioned releases and changelog.
 

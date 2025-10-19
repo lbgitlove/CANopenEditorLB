@@ -33,12 +33,13 @@ ensures a repeatable setup across contributors and CI agents.
    ```
 4. **Install project dependencies**
    ```bash
-   pip install -r python_port/requirements.txt
+   cd python_port
+   pip install -r requirements.txt
+   cd ..
    ```
 5. **Verify the bootstrap runs**
    ```bash
-   python -m canopen_node_editor
+   python -m canopen_node_editor --check
    ```
-
-The final command should print the resolved project directories, confirming the
-package imports correctly within the isolated environment.
+   The final command prints the resolved configuration and data directories,
+   confirming the package imports correctly within the isolated environment.
