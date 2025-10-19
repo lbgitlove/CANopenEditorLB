@@ -14,19 +14,34 @@ class DeviceEditorPage(QWidget):
     def __init__(self, device: Device, parent=None) -> None:
         super().__init__(parent)
         self.device = device
-        self.issues: list[ValidationIssue] = validate_device(device)
+        self.issues: list[ValidationIssue] = []
 
-        self._title = QLabel(self._format_title(), self)
+        self._title = QLabel("", self)
         self._title.setObjectName("devicePageTitle")
 
         self._summary = QTextEdit(self)
         self._summary.setReadOnly(True)
         self._summary.setObjectName("deviceSummary")
-        self._summary.setHtml(self._build_summary())
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._title)
         layout.addWidget(self._summary)
+
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    def set_device(self, device: Device) -> None:
+        """Replace the underlying device reference and refresh content."""
+
+        self.device = device
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Re-run validation and update the rendered summary."""
+
+        self.issues = validate_device(self.device)
+        self._title.setText(self._format_title())
+        self._summary.setHtml(self._build_summary())
 
     def _format_title(self) -> str:
         info = self.device.info

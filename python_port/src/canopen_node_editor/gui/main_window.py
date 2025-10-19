@@ -212,6 +212,7 @@ class EditorMainWindow(QMainWindow):
         self._pages[page] = session
         self._tabs.setCurrentIndex(index)
         self._update_context_widgets()
+        self._offer_mandatory_object_fix(page, session)
 
     def add_session(self, session: DeviceSession) -> None:
         """Public helper used by tests to inject sessions."""
@@ -337,6 +338,42 @@ class EditorMainWindow(QMainWindow):
             Command(self.tr("Show Validation Report"), self._focus_report_dock),
         ]
         return commands
+
+    def _offer_mandatory_object_fix(self, page: DeviceEditorPage, session: DeviceSession) -> None:
+        missing = [issue for issue in page.issues if issue.code == "MISSING_OBJECT"]
+        if not missing:
+            return
+
+        bullet_list = "\n".join(f"• {issue.message}" for issue in missing)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(self.tr("Missing mandatory objects"))
+        box.setText(self.tr("Some mandatory CANopen objects are missing."))
+        box.setInformativeText(
+            self.tr(
+                "{details}\n\nWould you like to add the standard CiA 301 entries automatically?"
+            ).format(details=bullet_list)
+        )
+        fix_button = box.addButton(self.tr("Add Automatically"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(self.tr("Ignore"), QMessageBox.ButtonRole.RejectRole)
+
+        box.exec()
+        if box.clickedButton() is not fix_button:
+            return
+
+        updated = self._network.apply_minimal_profile(session.identifier)
+        if not updated:
+            self._status.showMessage(
+                self.tr("No changes applied; device already contains the minimal profile."), 5000
+            )
+            return
+
+        page.set_device(session.device)
+        self._update_context_widgets()
+        indexes = ", ".join(f"0x{index:04X}" for index in updated)
+        self._status.showMessage(
+            self.tr("Added missing mandatory objects: {indexes}").format(indexes=indexes), 7000
+        )
 
     def _new_device(self) -> None:
         buttons = (

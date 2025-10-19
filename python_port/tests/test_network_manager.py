@@ -44,3 +44,17 @@ def test_create_device_with_minimal_profile():
     assert session.source_path is None
     assert 0x1000 in session.device.objects
     assert session.device.objects[0x1018].object_type == ObjectType.RECORD
+
+
+def test_apply_minimal_profile_adds_missing_objects():
+    manager = NetworkManager()
+    session = manager.create_device(include_minimal_profile=False)
+
+    updated = manager.apply_minimal_profile(session.identifier)
+
+    assert updated == [0x1000, 0x1001, 0x1018]
+    assert all(index in session.device.objects for index in updated)
+    assert session.dirty is True
+
+    # Running the fix again should not report additional changes.
+    assert manager.apply_minimal_profile(session.identifier) == []

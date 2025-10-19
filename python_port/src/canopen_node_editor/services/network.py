@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..exporters import export_canopennode_sources
-from ..model import Device, create_empty_device, create_minimal_profile_device
+from ..model import Device, create_empty_device, create_minimal_profile_device, merge_devices
 from ..parsers import parse_eds, parse_xdd
 
 @dataclass
@@ -48,6 +48,32 @@ class NetworkManager:
         )
         base_identifier = "Minimal Device" if include_minimal_profile else "New Device"
         return self.register_device(base_identifier, device)
+
+    def apply_minimal_profile(self, identifier: str) -> list[int]:
+        """Merge the CiA 301 minimal profile into the device and report changes."""
+
+        session = self._require_session(identifier)
+        template = create_minimal_profile_device()
+        current = session.device
+
+        updated: set[int] = set()
+        for index, entry in template.objects.items():
+            existing = current.get_object(index)
+            if existing is None:
+                updated.add(index)
+            else:
+                missing_subs = [
+                    subindex for subindex in entry.sub_objects if subindex not in existing.sub_objects
+                ]
+                if missing_subs:
+                    updated.add(index)
+
+        if not updated:
+            return []
+
+        session.device = merge_devices(current, template)
+        session.dirty = True
+        return sorted(updated)
 
     def mark_dirty(self, identifier: str, dirty: bool = True) -> None:
         session = self._require_session(identifier)

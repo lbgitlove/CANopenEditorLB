@@ -33,6 +33,7 @@ def _check_mandatory_objects(device: Device) -> Iterable[ValidationIssue]:
             yield ValidationIssue(
                 code="MISSING_OBJECT",
                 message=f"Mandatory object 0x{index:04X} ({name}) is missing.",
+                severity="warning",
                 index=index,
             )
 

@@ -7,6 +7,8 @@ def test_validation_reports_missing_objects():
     issues = validate_device(device)
     codes = {issue.code for issue in issues}
     assert "MISSING_OBJECT" in codes
+    severities = {issue.severity for issue in issues if issue.code == "MISSING_OBJECT"}
+    assert severities == {"warning"}
 
 
 def test_validation_detects_bad_range():
