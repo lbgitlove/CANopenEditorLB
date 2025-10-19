@@ -1,9 +1,9 @@
 """Parser and serializer for CiA XDD/XDC XML files."""
 from __future__ import annotations
 
-from pathlib import Path
 import warnings
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from ..model import (
     AccessType,
@@ -26,7 +26,18 @@ class _XDDParseError(RuntimeError):
     """Internal helper used to convert parsing issues into warnings."""
 
 NAMESPACE = "http://www.canopen.org/xml/CANopenDeviceProfile"
-NS = {"ns": NAMESPACE}
+
+
+def _xpath(*tags: str) -> str:
+    return ".//" + "/".join(f"{{*}}{tag}" for tag in tags)
+
+
+def _find(node: ET.Element, *tags: str) -> ET.Element | None:
+    return node.find(_xpath(*tags))
+
+
+def _findall(node: ET.Element, *tags: str) -> list[ET.Element]:
+    return node.findall(_xpath(*tags))
 
 
 def parse_xdd(path: str | Path) -> Device:
@@ -34,7 +45,7 @@ def parse_xdd(path: str | Path) -> Device:
     root = tree.getroot()
 
     device = Device(info=_parse_device_info(root))
-    for obj in root.findall(".//ns:ProfileBody/ns:DeviceManager/ns:ObjectList/ns:Object", NS):
+    for obj in _findall(root, "ProfileBody", "DeviceManager", "ObjectList", "Object"):
         try:
             entry = _parse_object(obj)
         except _XDDParseError as exc:
@@ -46,21 +57,21 @@ def parse_xdd(path: str | Path) -> Device:
 
 
 def _parse_device_info(root: ET.Element) -> DeviceInfo:
-    identity = root.find(".//ns:ProfileBody/ns:DeviceIdentity", NS)
+    identity = _find(root, "ProfileBody", "DeviceIdentity")
     if identity is None:
         return DeviceInfo()
     return DeviceInfo(
-        vendor_name=_get_text(identity, "ns:VendorName"),
-        vendor_number=_get_text(identity, "ns:VendorID"),
-        product_name=_get_text(identity, "ns:ProductName"),
-        product_number=_get_text(identity, "ns:ProductNumber"),
-        revision_number=_get_text(identity, "ns:RevisionNumber"),
-        order_code=_get_text(identity, "ns:OrderNumber"),
+        vendor_name=_get_text(identity, "VendorName"),
+        vendor_number=_get_text(identity, "VendorID"),
+        product_name=_get_text(identity, "ProductName"),
+        product_number=_get_text(identity, "ProductNumber"),
+        revision_number=_get_text(identity, "RevisionNumber"),
+        order_code=_get_text(identity, "OrderNumber"),
     )
 
 
-def _get_text(node: ET.Element, query: str) -> str | None:
-    child = node.find(query, NS)
+def _get_text(node: ET.Element, tag: str) -> str | None:
+    child = _find(node, tag)
     if child is None or child.text is None:
         return None
     return child.text
@@ -96,18 +107,18 @@ def _parse_object(node: ET.Element) -> ObjectEntry:
 
     entry = ObjectEntry(
         index=index,
-        name=_get_text(node, "ns:Name") or f"0x{index:04X}",
+        name=_get_text(node, "Name") or f"0x{index:04X}",
         object_type=object_type,
-        data_type=_parse_data_type(_get_text(node, "ns:DataType")),
-        access_type=_parse_access_type(_get_text(node, "ns:AccessType")),
-        default=_get_text(node, "ns:DefaultValue"),
-        value=_get_text(node, "ns:ActualValue"),
-        minimum=_get_text(node, "ns:LowLimit"),
-        maximum=_get_text(node, "ns:HighLimit"),
-        pdo_mapping=_parse_pdo(_get_text(node, "ns:PDOMapping")),
+        data_type=_parse_data_type(_get_text(node, "DataType")),
+        access_type=_parse_access_type(_get_text(node, "AccessType")),
+        default=_get_text(node, "DefaultValue"),
+        value=_get_text(node, "ActualValue"),
+        minimum=_get_text(node, "LowLimit"),
+        maximum=_get_text(node, "HighLimit"),
+        pdo_mapping=_parse_pdo(_get_text(node, "PDOMapping")),
     )
 
-    for sub in node.findall("ns:SubObjectList/ns:SubObject", NS):
+    for sub in _findall(node, "SubObjectList", "SubObject"):
         subindex_attr = sub.attrib.get("subIndex")
         if subindex_attr is None:
             warnings.warn(
@@ -127,14 +138,14 @@ def _parse_object(node: ET.Element) -> ObjectEntry:
             continue
         entry.sub_objects[subindex] = SubObject(
             key=ObjectKey(index=index, subindex=subindex),
-            name=_get_text(sub, "ns:Name") or f"0x{index:04X} sub{subindex}",
-            data_type=_parse_data_type(_get_text(sub, "ns:DataType")) or DataType.UNSIGNED8,
-            access_type=_parse_access_type(_get_text(sub, "ns:AccessType")) or AccessType.RW,
-            default=_get_text(sub, "ns:DefaultValue"),
-            value=_get_text(sub, "ns:ActualValue"),
-            minimum=_get_text(sub, "ns:LowLimit"),
-            maximum=_get_text(sub, "ns:HighLimit"),
-            pdo_mapping=_parse_pdo(_get_text(sub, "ns:PDOMapping")),
+            name=_get_text(sub, "Name") or f"0x{index:04X} sub{subindex}",
+            data_type=_parse_data_type(_get_text(sub, "DataType")) or DataType.UNSIGNED8,
+            access_type=_parse_access_type(_get_text(sub, "AccessType")) or AccessType.RW,
+            default=_get_text(sub, "DefaultValue"),
+            value=_get_text(sub, "ActualValue"),
+            minimum=_get_text(sub, "LowLimit"),
+            maximum=_get_text(sub, "HighLimit"),
+            pdo_mapping=_parse_pdo(_get_text(sub, "PDOMapping")),
         )
     return entry
 

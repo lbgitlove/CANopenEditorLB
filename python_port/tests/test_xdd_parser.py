@@ -51,3 +51,30 @@ def test_parse_xdd_missing_metadata_warns(tmp_path):
     assert 0x2000 in device.objects
     assert device.objects[0x2000].object_type == ObjectType.VAR
     assert device.objects[0x2000].sub_objects == {}
+
+
+def test_parse_xdd_without_namespace(tmp_path):
+    xdd_content = """
+    <DeviceProfile>
+        <ProfileBody>
+            <DeviceIdentity>
+                <VendorName>Acme</VendorName>
+            </DeviceIdentity>
+            <DeviceManager>
+                <ObjectList>
+                    <Object index="0x2000" objectType="7">
+                        <Name>Vendor Specific</Name>
+                    </Object>
+                </ObjectList>
+            </DeviceManager>
+        </ProfileBody>
+    </DeviceProfile>
+    """
+    xdd_path = tmp_path / "no_namespace.xdd"
+    xdd_path.write_text(xdd_content, encoding="utf-8")
+
+    device = parse_xdd(xdd_path)
+
+    assert device.info.vendor_name == "Acme"
+    assert 0x2000 in device.objects
+    assert device.objects[0x2000].name == "Vendor Specific"
