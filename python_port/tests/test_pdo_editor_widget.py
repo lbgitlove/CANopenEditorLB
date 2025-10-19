@@ -28,6 +28,10 @@ def test_pdo_editor_lists_mapped_objects(qtbot):
     qtbot.addWidget(widget)
     widget.set_device(device)
 
+    selector = widget.tpdo_selector()
+    labels = [selector.item(i).text() for i in range(selector.count())]
+    assert any("0x1A00" in label for label in labels)
+
     table = widget.tpdo_mapping_view()
     rows = {table.item(row, 0).text() for row in range(table.rowCount())}
 
@@ -67,6 +71,7 @@ def test_pdo_editor_displays_communication_parameters(qtbot):
     widget = PDOEditorWidget()
     qtbot.addWidget(widget)
     widget.set_device(device)
+    widget.tpdo_selector().setCurrentRow(0)
 
     comm_table = widget.tpdo_communication_view()
 
@@ -110,6 +115,7 @@ def test_editing_tpdo_mapping_updates_device(qtbot):
     widget = PDOEditorWidget()
     qtbot.addWidget(widget)
     widget.set_device(device)
+    widget.tpdo_selector().setCurrentRow(0)
 
     table = widget.tpdo_mapping_view()
     target_row = next(
@@ -165,6 +171,7 @@ def test_editing_rpdo_communication_updates_device(qtbot):
     widget = PDOEditorWidget()
     qtbot.addWidget(widget)
     widget.set_device(device)
+    widget.rpdo_selector().setCurrentRow(0)
 
     table = widget.rpdo_communication_view()
     target_row = next(

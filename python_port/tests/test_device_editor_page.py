@@ -81,6 +81,33 @@ def test_subindex_pdo_mapping_updates_pdo_editor(qtbot):
     }
     device.add_object(entry)
 
+    mapping_entry = ObjectEntry(
+        index=0x1A00,
+        name="TPDO1 Mapping",
+        object_type=ObjectType.RECORD,
+        data_type=None,
+        access_type=None,
+    )
+    mapping_entry.sub_objects = {
+        0: SubObject(
+            key=ObjectKey(index=0x1A00, subindex=0),
+            name="Number of entries",
+            data_type=DataType.UNSIGNED8,
+            access_type=AccessType.RO,
+            value="1",
+            default="1",
+        ),
+        1: SubObject(
+            key=ObjectKey(index=0x1A00, subindex=1),
+            name="Mapped object",
+            data_type=DataType.UNSIGNED32,
+            access_type=AccessType.RW,
+            value="0x20000008",
+            default="0x20000008",
+        ),
+    }
+    device.add_object(mapping_entry)
+
     page = DeviceEditorPage(device)
     qtbot.addWidget(page)
     page.object_dictionary.select_entry(entry)
@@ -95,5 +122,11 @@ def test_subindex_pdo_mapping_updates_pdo_editor(qtbot):
     mapping_combo.setCurrentIndex(index)
 
     table = page.pdo_editor.tpdo_mapping_view()
-    rows = {table.item(row, 0).text() for row in range(table.rowCount())}
-    assert "0x2000" in rows
+
+    def has_mappable_entry() -> bool:
+        return any(
+            table.item(row, 0).text() == "0x2000"
+            for row in range(table.rowCount())
+        )
+
+    qtbot.waitUntil(has_mappable_entry)
