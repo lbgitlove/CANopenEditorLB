@@ -27,12 +27,18 @@ class PDOMapping(Enum):
 
     OPTIONAL = "0"
     DEFAULT = "1"
+    NONE = "no"
+    TPDO = "TPDO"
+    RPDO = "RPDO"
 
     @classmethod
     def from_eds(cls, value: str) -> "PDOMapping":
-        normalized = value.strip()
+        normalized = value.strip().lower()
+        mapped = _PDOMAPPING_ALIASES.get(normalized)
+        if mapped is not None:
+            return mapped
         for member in cls:
-            if member.value == normalized:
+            if member.value.lower() == normalized:
                 return member
         raise ValueError(f"Unsupported PDOMapping '{value}'")
 
@@ -46,6 +52,9 @@ class AccessType(Enum):
     @classmethod
     def from_eds(cls, value: str) -> "AccessType":
         normalized = value.strip().lower()
+        mapped = _ACCESS_ALIASES.get(normalized)
+        if mapped is not None:
+            return mapped
         try:
             return cls(normalized)
         except ValueError as exc:
@@ -84,8 +93,9 @@ class DataType(Enum):
     @classmethod
     def from_eds(cls, value: str) -> "DataType":
         normalized = value.strip().upper()
+        alias = _EDS_ALIAS_MAP.get(normalized, normalized)
         try:
-            return _EDS_NAME_MAP[normalized]
+            return _EDS_NAME_MAP[alias]
         except KeyError as exc:
             raise ValueError(f"Unsupported DataType '{value}'") from exc
 
@@ -100,3 +110,58 @@ class ObjectKey:
 
 
 _EDS_NAME_MAP: Dict[str, DataType] = {name: member for name, member in DataType.__members__.items()}
+_EDS_ALIAS_MAP: Dict[str, str] = {
+    "BOOL": "BOOLEAN",
+    "BITSTRING": "OCTET_STRING",
+    "VISIBLE-STRING": "VISIBLE_STRING",
+    "VISIBLE STRING": "VISIBLE_STRING",
+    "OCTET-STRING": "OCTET_STRING",
+    "OCTET STRING": "OCTET_STRING",
+    "UNICODE-STRING": "UNICODE_STRING",
+    "UNICODE STRING": "UNICODE_STRING",
+    "USINT": "UNSIGNED8",
+    "UINT": "UNSIGNED16",
+    "UDINT": "UNSIGNED32",
+    "ULINT": "UNSIGNED64",
+    "SINT": "INTEGER8",
+    "INT": "INTEGER16",
+    "DINT": "INTEGER32",
+    "LINT": "INTEGER64",
+    "REAL": "REAL32",
+    "LREAL": "REAL64",
+    "SIGNED8": "INTEGER8",
+    "SIGNED16": "INTEGER16",
+    "SIGNED32": "INTEGER32",
+    "SIGNED64": "INTEGER64",
+    "UNSIGNED8": "UNSIGNED8",
+    "UNSIGNED16": "UNSIGNED16",
+    "UNSIGNED32": "UNSIGNED32",
+    "UNSIGNED64": "UNSIGNED64",
+}
+
+_PDOMAPPING_ALIASES: Dict[str, PDOMapping] = {
+    "optional": PDOMapping.OPTIONAL,
+    "0": PDOMapping.OPTIONAL,
+    "default": PDOMapping.DEFAULT,
+    "1": PDOMapping.DEFAULT,
+    "no": PDOMapping.NONE,
+    "none": PDOMapping.NONE,
+    "tpdo": PDOMapping.TPDO,
+    "rpdo": PDOMapping.RPDO,
+}
+
+_ACCESS_ALIASES: Dict[str, AccessType] = {
+    "readonly": AccessType.RO,
+    "read": AccessType.RO,
+    "wo": AccessType.WO,
+    "write": AccessType.WO,
+    "writeonly": AccessType.WO,
+    "writeonlyonce": AccessType.WO,
+    "rw": AccessType.RW,
+    "readwrite": AccessType.RW,
+    "readwriteonce": AccessType.RW,
+    "readwriteinputonly": AccessType.RW,
+    "readwriteoutputonly": AccessType.RW,
+    "constant": AccessType.CONST,
+    "const": AccessType.CONST,
+}
