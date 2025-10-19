@@ -45,7 +45,7 @@ def parse_xdd(path: str | Path) -> Device:
     root = tree.getroot()
 
     device = Device(info=_parse_device_info(root))
-    for obj in _findall(root, "ProfileBody", "DeviceManager", "ObjectList", "Object"):
+    for obj in _iter_object_nodes(root):
         try:
             entry = _parse_object(obj)
         except _XDDParseError as exc:
@@ -57,7 +57,7 @@ def parse_xdd(path: str | Path) -> Device:
 
 
 def _parse_device_info(root: ET.Element) -> DeviceInfo:
-    identity = _find(root, "ProfileBody", "DeviceIdentity")
+    identity = _find(root, "DeviceIdentity")
     if identity is None:
         return DeviceInfo()
     return DeviceInfo(
@@ -75,6 +75,31 @@ def _get_text(node: ET.Element, tag: str) -> str | None:
     if child is None or child.text is None:
         return None
     return child.text
+
+
+def _iter_object_nodes(root: ET.Element) -> list[ET.Element]:
+    """Return ordered object nodes irrespective of the surrounding structure."""
+
+    nodes: list[ET.Element] = []
+    seen: set[int] = set()
+
+    for candidate in _findall(root, "Object"):
+        index_attr = candidate.attrib.get("index")
+        if not index_attr:
+            # Let the parser raise a warning later when it attempts to parse
+            nodes.append(candidate)
+            continue
+        try:
+            index = int(index_attr, 16)
+        except ValueError:
+            nodes.append(candidate)
+            continue
+        if index in seen:
+            continue
+        seen.add(index)
+        nodes.append(candidate)
+
+    return nodes
 
 
 def _parse_object(node: ET.Element) -> ObjectEntry:

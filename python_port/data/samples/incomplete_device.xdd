@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DeviceProfile xmlns="http://www.canopen.org/xml/CANopenDeviceProfile">
+  <ProfileBody>
+    <ApplicationLayers>
+      <DeviceIdentity>
+        <VendorName>Example Corp</VendorName>
+        <ProductName>Incomplete Device</ProductName>
+      </DeviceIdentity>
+      <ObjectDictionary>
+        <ObjectList>
+          <Object index="0x2000" objectType="7">
+            <Name>Vendor Specific Parameter</Name>
+            <DataType>UNSIGNED16</DataType>
+            <AccessType>rw</AccessType>
+            <DefaultValue>0</DefaultValue>
+          </Object>
+          <Object index="0x2100" objectType="9">
+            <Name>Device Parameters</Name>
+            <SubObjectList>
+              <SubObject subIndex="0">
+                <Name>Number of Entries</Name>
+                <DataType>UNSIGNED8</DataType>
+                <AccessType>ro</AccessType>
+                <DefaultValue>2</DefaultValue>
+              </SubObject>
+              <SubObject subIndex="1">
+                <Name>Configuration Value</Name>
+                <DataType>UNSIGNED32</DataType>
+                <AccessType>rw</AccessType>
+              </SubObject>
+            </SubObjectList>
+          </Object>
+        </ObjectList>
+      </ObjectDictionary>
+    </ApplicationLayers>
+  </ProfileBody>
+</DeviceProfile>

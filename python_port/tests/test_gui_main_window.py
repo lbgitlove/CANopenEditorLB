@@ -90,6 +90,7 @@ def test_new_device_action_asks_for_profile(monkeypatch, qtbot, settings_manager
 
     monkeypatch.setattr(network, "create_device", fake_create)
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(EditorMainWindow, "_offer_mandatory_object_fix", lambda *args, **kwargs: None)
 
     window = EditorMainWindow(network, settings_manager, profile_repository=ProfileRepository([]))
     qtbot.addWidget(window)
@@ -97,3 +98,26 @@ def test_new_device_action_asks_for_profile(monkeypatch, qtbot, settings_manager
     window._new_device()
 
     assert created["args"] is False
+
+
+@pytest.mark.usefixtures("qapp")
+def test_incomplete_xdd_populates_tree(monkeypatch, qtbot, settings_manager):
+    root = Path(__file__).resolve().parents[1]
+    xdd_path = root / "data" / "samples" / "incomplete_device.xdd"
+
+    network = NetworkManager()
+    session = network.open_device(xdd_path)
+
+    # Avoid blocking on the warning prompt during automated tests
+    monkeypatch.setattr(EditorMainWindow, "_offer_mandatory_object_fix", lambda *args, **kwargs: None)
+
+    window = EditorMainWindow(network, settings_manager, profile_repository=ProfileRepository([]))
+    qtbot.addWidget(window)
+    window.show()
+
+    window.add_session(session)
+
+    qtbot.waitUntil(lambda: window._object_view.model().rowCount() > 0, timeout=2000)
+
+    rows = [window._object_view.model().item(row, 0).text() for row in range(window._object_view.model().rowCount())]
+    assert "0x2000" in rows

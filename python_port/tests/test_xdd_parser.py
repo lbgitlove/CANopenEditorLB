@@ -78,3 +78,13 @@ def test_parse_xdd_without_namespace(tmp_path):
     assert device.info.vendor_name == "Acme"
     assert 0x2000 in device.objects
     assert device.objects[0x2000].name == "Vendor Specific"
+
+
+def test_parse_xdd_with_application_layers_structure():
+    xdd_path = SAMPLES / "incomplete_device.xdd"
+    device = parse_xdd(xdd_path)
+
+    assert device.info.product_name == "Incomplete Device"
+    assert 0x2000 in device.objects
+    assert 0x2100 in device.objects
+    assert device.objects[0x2100].sub_objects[1].name == "Configuration Value"
