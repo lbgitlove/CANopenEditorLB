@@ -7,6 +7,7 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QGroupBox,
     QHeaderView,
     QListWidget,
@@ -19,6 +20,35 @@ from PySide6.QtWidgets import (
 )
 
 from ...model import Device, ObjectEntry, PDOMapping, SubObject
+
+
+_DATA_TYPE_BIT_LENGTH = {
+    # Integer types -----------------------------------------------------
+    # fmt: off
+    # Signed
+    "INTEGER8": 8,
+    "INTEGER16": 16,
+    "INTEGER32": 32,
+    "INTEGER40": 40,
+    "INTEGER48": 48,
+    "INTEGER56": 56,
+    "INTEGER64": 64,
+    "INTEGER24": 24,
+    # Unsigned
+    "UNSIGNED8": 8,
+    "UNSIGNED16": 16,
+    "UNSIGNED24": 24,
+    "UNSIGNED32": 32,
+    "UNSIGNED40": 40,
+    "UNSIGNED48": 48,
+    "UNSIGNED56": 56,
+    "UNSIGNED64": 64,
+    # Boolean and floating point
+    "BOOLEAN": 1,
+    "REAL32": 32,
+    "REAL64": 64,
+    # fmt: on
+}
 
 
 @dataclass
@@ -327,9 +357,15 @@ class PDOEditorWidget(QWidget):
                     rows.append((entry, sub))
             else:
                 rows.append((entry, None))
+        mapping_options: list[tuple[ObjectEntry, SubObject | None]] | None = None
         if kind == "mapping":
-            rows.extend(self._collect_mappable_entries(mapping_type))
-        self._fill_rows(table, rows)
+            mapping_options = self._collect_mappable_entries(mapping_type)
+        self._fill_rows(
+            table,
+            rows,
+            mapping_entry=entry if kind == "mapping" else None,
+            mapping_options=mapping_options,
+        )
         table.blockSignals(False)
 
     def _clear_table(self, table: QTableWidget) -> None:
@@ -339,7 +375,12 @@ class PDOEditorWidget(QWidget):
 
     # ------------------------------------------------------------------
     def _fill_rows(
-        self, table: QTableWidget, entries: list[tuple[ObjectEntry, SubObject | None]]
+        self,
+        table: QTableWidget,
+        entries: list[tuple[ObjectEntry, SubObject | None]],
+        *,
+        mapping_entry: ObjectEntry | None = None,
+        mapping_options: list[tuple[ObjectEntry, SubObject | None]] | None = None,
     ) -> None:
         table.blockSignals(True)
         table.setRowCount(len(entries))
@@ -366,6 +407,22 @@ class PDOEditorWidget(QWidget):
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
                     item.setData(self._field_role, (entry, sub, field))
                 table.setItem(row, column, item)
+
+            if (
+                mapping_entry is not None
+                and mapping_options is not None
+                and entry.index == mapping_entry.index
+                and (sub is not None or not entry.sub_objects)
+                and self._target_from(entry, sub) is not None
+            ):
+                self._attach_mapping_selector(
+                    table,
+                    row,
+                    value_item,
+                    entry,
+                    sub,
+                    mapping_options,
+                )
         table.blockSignals(False)
 
     def _collect_mappable_entries(
@@ -373,45 +430,17 @@ class PDOEditorWidget(QWidget):
     ) -> list[tuple[ObjectEntry, SubObject | None]]:
         if self._device is None:
             return []
+        section = self._sections[mapping_type]
         entries: list[tuple[ObjectEntry, SubObject | None]] = []
         for entry in self._device.all_entries():
+            if section.mapping_start <= entry.index <= section.mapping_end:
+                continue
             if entry.pdo_mapping == mapping_type:
                 entries.append((entry, None))
             for subindex, sub in sorted(entry.sub_objects.items()):
                 if sub.pdo_mapping == mapping_type:
                     entries.append((entry, sub))
         return entries
-
-
-    def _fill_rows(
-        self, table: QTableWidget, entries: list[tuple[ObjectEntry, SubObject | None]]
-    ) -> None:
-        table.blockSignals(True)
-        table.setRowCount(len(entries))
-        for row, (entry, sub) in enumerate(entries):
-            index_item = QTableWidgetItem(f"0x{entry.index:04X}")
-            subindex_text = f"{sub.key.subindex:02X}" if sub else "-"
-            subindex_item = QTableWidgetItem(subindex_text)
-            name_item = QTableWidgetItem(sub.name if sub else entry.name)
-            value_item = QTableWidgetItem(self._value_text(entry, sub))
-            default_item = QTableWidgetItem(self._default_text(entry, sub))
-
-            columns = [
-                (index_item, None),
-                (subindex_item, None),
-                (name_item, "name"),
-                (value_item, "value"),
-                (default_item, "default"),
-            ]
-
-            for column, (item, field) in enumerate(columns):
-                if field is None:
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                else:
-                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-                    item.setData(self._field_role, (entry, sub, field))
-                table.setItem(row, column, item)
-        table.blockSignals(False)
 
     def _value_text(self, entry: ObjectEntry, sub: SubObject | None) -> str:
         if sub and sub.value:
@@ -439,3 +468,108 @@ class PDOEditorWidget(QWidget):
         text = item.text().strip()
         target = sub or entry
         setattr(target, field, text or None)
+
+    # ------------------------------------------------------------------
+    def _attach_mapping_selector(
+        self,
+        table: QTableWidget,
+        row: int,
+        value_item: QTableWidgetItem,
+        entry: ObjectEntry,
+        sub: SubObject | None,
+        options: list[tuple[ObjectEntry, SubObject | None]],
+    ) -> None:
+        target = self._target_from(entry, sub)
+        if target is None:
+            return
+
+        combo = QComboBox(table)
+        combo.setEditable(False)
+
+        combo.addItem(self.tr("Not mapped"), None)
+        for option_entry, option_sub in options:
+            option_target = self._target_from(option_entry, option_sub)
+            if option_target is None:
+                continue
+            mapping_value = self._encode_mapping_value(option_entry, option_sub)
+            if mapping_value is None:
+                continue
+            label = self._format_mapping_option(option_entry, option_sub, mapping_value)
+            combo.addItem(label, mapping_value)
+
+        current_value = target.value or target.default
+        if current_value:
+            normalized = self._normalise_mapping_value(current_value)
+            index = combo.findData(normalized)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+        combo.currentIndexChanged.connect(
+            lambda _index, item=value_item, target=target, widget=combo: self._on_mapping_changed(
+                item, target, widget
+            )
+        )
+
+        value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        table.setCellWidget(row, 3, combo)
+
+    def _format_mapping_option(
+        self,
+        entry: ObjectEntry,
+        sub: SubObject | None,
+        mapping_value: str,
+    ) -> str:
+        subindex = sub.key.subindex if sub else 0
+        name = sub.name if sub else entry.name
+        bits = self._bit_length(entry, sub)
+        detail = f"{bits} bit" if bits == 1 else f"{bits} bits" if bits else self.tr("unknown")
+        return self.tr("0x{index:04X}:{sub:02X} – {name} ({detail})").format(
+            index=entry.index,
+            sub=subindex,
+            name=name,
+            detail=detail,
+        )
+
+    def _on_mapping_changed(
+        self, item: QTableWidgetItem, target: ObjectEntry | SubObject, combo: QComboBox
+    ) -> None:
+        data = combo.currentData()
+        if data is None:
+            target.value = None
+            item.setText("")
+            return
+        target.value = data
+        item.setText(data)
+
+    def _target_from(
+        self, entry: ObjectEntry, sub: SubObject | None
+    ) -> ObjectEntry | SubObject | None:
+        if sub is not None:
+            return sub
+        if entry.sub_objects:
+            return None
+        return entry
+
+    def _encode_mapping_value(
+        self, entry: ObjectEntry, sub: SubObject | None
+    ) -> str | None:
+        bits = self._bit_length(entry, sub)
+        if bits is None:
+            return None
+        subindex = sub.key.subindex if sub else 0
+        value = (entry.index << 16) | (subindex << 8) | bits
+        return f"0x{value:08X}"
+
+    def _normalise_mapping_value(self, value: str) -> str:
+        try:
+            numeric = int(value, 0)
+        except ValueError:
+            return value
+        return f"0x{numeric:08X}"
+
+    def _bit_length(self, entry: ObjectEntry, sub: SubObject | None) -> int | None:
+        target = sub or entry
+        data_type = target.data_type
+        if data_type is None:
+            return None
+        return _DATA_TYPE_BIT_LENGTH.get(data_type.name)

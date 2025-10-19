@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtWidgets import QComboBox
+
 from canopen_node_editor.gui.widgets.device_page import DeviceEditorPage
 from canopen_node_editor.model import (
     AccessType,
@@ -123,10 +125,13 @@ def test_subindex_pdo_mapping_updates_pdo_editor(qtbot):
 
     table = page.pdo_editor.tpdo_mapping_view()
 
-    def has_mappable_entry() -> bool:
-        return any(
-            table.item(row, 0).text() == "0x2000"
-            for row in range(table.rowCount())
-        )
+    def combo_contains_entry() -> bool:
+        for row in range(table.rowCount()):
+            widget = table.cellWidget(row, 3)
+            if isinstance(widget, QComboBox):
+                for index in range(widget.count()):
+                    if "0x2000" in widget.itemText(index):
+                        return True
+        return False
 
-    qtbot.waitUntil(has_mappable_entry)
+    qtbot.waitUntil(combo_contains_entry)

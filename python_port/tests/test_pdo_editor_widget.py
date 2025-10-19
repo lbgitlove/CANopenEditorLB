@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtWidgets import QComboBox
+
 from canopen_node_editor.gui.widgets.pdo_editor import PDOEditorWidget
 from canopen_node_editor.model import (
     AccessType,
@@ -33,9 +35,19 @@ def test_pdo_editor_lists_mapped_objects(qtbot):
     assert any("0x1A00" in label for label in labels)
 
     table = widget.tpdo_mapping_view()
-    rows = {table.item(row, 0).text() for row in range(table.rowCount())}
+    combos = [
+        table.cellWidget(row, 3)
+        for row in range(table.rowCount())
+        if isinstance(table.cellWidget(row, 3), QComboBox)
+    ]
+    assert combos
 
-    assert "0x1001" in rows
+    options = {
+        combos[0].itemText(index)
+        for index in range(combos[0].count())
+    }
+
+    assert any("0x1001" in option for option in options)
 
 
 @pytest.mark.qt
@@ -83,7 +95,7 @@ def test_pdo_editor_displays_communication_parameters(qtbot):
 @pytest.mark.qt
 def test_editing_tpdo_mapping_updates_device(qtbot):
     device = Device()
-    entry = ObjectEntry(
+    mapping_entry = ObjectEntry(
         index=0x1A00,
         name="TPDO1 Mapping",
         object_type=ObjectType.RECORD,
@@ -91,7 +103,7 @@ def test_editing_tpdo_mapping_updates_device(qtbot):
         access_type=None,
         pdo_mapping=PDOMapping.TPDO,
     )
-    entry.sub_objects = {
+    mapping_entry.sub_objects = {
         0: SubObject(
             key=ObjectKey(index=0x1A00, subindex=0),
             name="Number of entries",
@@ -110,7 +122,17 @@ def test_editing_tpdo_mapping_updates_device(qtbot):
             pdo_mapping=PDOMapping.TPDO,
         ),
     }
-    device.add_object(entry)
+    device.add_object(mapping_entry)
+
+    source_entry = ObjectEntry(
+        index=0x2000,
+        name="Process data",
+        object_type=ObjectType.VAR,
+        data_type=DataType.UNSIGNED16,
+        access_type=AccessType.RO,
+        pdo_mapping=PDOMapping.TPDO,
+    )
+    device.add_object(source_entry)
 
     widget = PDOEditorWidget()
     qtbot.addWidget(widget)
@@ -124,10 +146,15 @@ def test_editing_tpdo_mapping_updates_device(qtbot):
         if table.item(row, 1).text() == "01"
     )
 
-    item = table.item(target_row, 3)
-    item.setText("0x20000010")
+    combo = table.cellWidget(target_row, 3)
+    assert isinstance(combo, QComboBox)
 
-    assert entry.sub_objects[1].value == "0x20000010"
+    expected_value = "0x20000010"
+    index = combo.findData(expected_value)
+    assert index >= 0
+    combo.setCurrentIndex(index)
+
+    assert mapping_entry.sub_objects[1].value == expected_value
 
 
 @pytest.mark.qt
