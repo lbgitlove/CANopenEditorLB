@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from PySide6.QtCore import QLocale, QTranslator
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyle
 
 try:
     from qt_material import apply_stylesheet
@@ -52,9 +51,9 @@ class EditorApplication(QApplication):
         self._translator_installed = False
         self._locales = list(available_locales or [QLocale.system()])
 
-        icon = QIcon()
-        icon.addFile(str(self.style().standardIcon(self.style().SP_ComputerIcon)))
-        self.setWindowIcon(icon)
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
         preferences = self._settings.load()
         self._apply_theme(preferences)
