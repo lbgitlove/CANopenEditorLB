@@ -102,16 +102,29 @@ def _iter_object_nodes(root: ET.Element) -> list[ET.Element]:
     return nodes
 
 
+def _get_attr(node: ET.Element, name: str) -> str | None:
+    """Return an attribute value using case-insensitive lookup."""
+
+    if name in node.attrib:
+        return node.attrib[name]
+
+    lowered = name.lower()
+    for key, value in node.attrib.items():
+        if key.lower() == lowered:
+            return value
+    return None
+
+
 def _parse_object(node: ET.Element) -> ObjectEntry:
-    index_attr = node.attrib.get("index")
+    index_attr = _get_attr(node, "index")
     if not index_attr:
         raise _XDDParseError("Encountered object without index; skipping entry")
     try:
-        index = int(index_attr, 16)
+        index = int(index_attr, 0)
     except ValueError as exc:
         raise _XDDParseError(f"Invalid object index '{index_attr}'") from exc
 
-    object_type_value = node.attrib.get("objectType")
+    object_type_value = _get_attr(node, "objectType")
     if object_type_value is None:
         warnings.warn(
             f"Object 0x{index:04X} missing objectType attribute; defaulting to VAR",
@@ -144,7 +157,7 @@ def _parse_object(node: ET.Element) -> ObjectEntry:
     )
 
     for sub in _findall(node, "SubObjectList", "SubObject"):
-        subindex_attr = sub.attrib.get("subIndex")
+        subindex_attr = _get_attr(sub, "subIndex")
         if subindex_attr is None:
             warnings.warn(
                 f"Object 0x{index:04X} has sub-object without subIndex; skipping sub-object",

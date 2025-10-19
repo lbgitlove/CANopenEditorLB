@@ -88,3 +88,11 @@ def test_parse_xdd_with_application_layers_structure():
     assert 0x2000 in device.objects
     assert 0x2100 in device.objects
     assert device.objects[0x2100].sub_objects[1].name == "Configuration Value"
+
+
+def test_parse_xdd_with_mixed_case_attributes():
+    xdd_path = SAMPLES / "mixed_case_device.xdd"
+    device = parse_xdd(xdd_path)
+
+    indices = {entry.index for entry in device.all_entries()}
+    assert indices.issuperset({0x2000, 0x2200})
