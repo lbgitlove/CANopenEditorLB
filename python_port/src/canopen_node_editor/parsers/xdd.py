@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
+import warnings
 import xml.etree.ElementTree as ET
 
 from ..model import (
@@ -17,6 +17,14 @@ from ..model import (
     SubObject,
 )
 
+
+class XDDParseWarning(UserWarning):
+    """Warning type emitted when non-fatal XDD issues are encountered."""
+
+
+class _XDDParseError(RuntimeError):
+    """Internal helper used to convert parsing issues into warnings."""
+
 NAMESPACE = "http://www.canopen.org/xml/CANopenDeviceProfile"
 NS = {"ns": NAMESPACE}
 
@@ -27,8 +35,13 @@ def parse_xdd(path: str | Path) -> Device:
 
     device = Device(info=_parse_device_info(root))
     for obj in root.findall(".//ns:ProfileBody/ns:DeviceManager/ns:ObjectList/ns:Object", NS):
-        entry = _parse_object(obj)
-        device.add_object(entry)
+        try:
+            entry = _parse_object(obj)
+        except _XDDParseError as exc:
+            warnings.warn(str(exc), XDDParseWarning, stacklevel=2)
+            continue
+        if entry is not None:
+            device.add_object(entry)
     return device
 
 
@@ -54,11 +67,37 @@ def _get_text(node: ET.Element, query: str) -> str | None:
 
 
 def _parse_object(node: ET.Element) -> ObjectEntry:
-    index = int(node.attrib["index"], 16)
+    index_attr = node.attrib.get("index")
+    if not index_attr:
+        raise _XDDParseError("Encountered object without index; skipping entry")
+    try:
+        index = int(index_attr, 16)
+    except ValueError as exc:
+        raise _XDDParseError(f"Invalid object index '{index_attr}'") from exc
+
+    object_type_value = node.attrib.get("objectType")
+    if object_type_value is None:
+        warnings.warn(
+            f"Object 0x{index:04X} missing objectType attribute; defaulting to VAR",
+            XDDParseWarning,
+            stacklevel=3,
+        )
+        object_type = ObjectType.VAR
+    else:
+        try:
+            object_type = ObjectType(int(object_type_value))
+        except (ValueError, KeyError):
+            warnings.warn(
+                f"Object 0x{index:04X} has unsupported objectType '{object_type_value}'; defaulting to VAR",
+                XDDParseWarning,
+                stacklevel=3,
+            )
+            object_type = ObjectType.VAR
+
     entry = ObjectEntry(
         index=index,
         name=_get_text(node, "ns:Name") or f"0x{index:04X}",
-        object_type=ObjectType(int(node.attrib["objectType"])),
+        object_type=object_type,
         data_type=_parse_data_type(_get_text(node, "ns:DataType")),
         access_type=_parse_access_type(_get_text(node, "ns:AccessType")),
         default=_get_text(node, "ns:DefaultValue"),
@@ -69,7 +108,23 @@ def _parse_object(node: ET.Element) -> ObjectEntry:
     )
 
     for sub in node.findall("ns:SubObjectList/ns:SubObject", NS):
-        subindex = int(sub.attrib["subIndex"], 0)
+        subindex_attr = sub.attrib.get("subIndex")
+        if subindex_attr is None:
+            warnings.warn(
+                f"Object 0x{index:04X} has sub-object without subIndex; skipping sub-object",
+                XDDParseWarning,
+                stacklevel=3,
+            )
+            continue
+        try:
+            subindex = int(subindex_attr, 0)
+        except ValueError:
+            warnings.warn(
+                f"Object 0x{index:04X} has invalid subIndex '{subindex_attr}'; skipping sub-object",
+                XDDParseWarning,
+                stacklevel=3,
+            )
+            continue
         entry.sub_objects[subindex] = SubObject(
             key=ObjectKey(index=index, subindex=subindex),
             name=_get_text(sub, "ns:Name") or f"0x{index:04X} sub{subindex}",

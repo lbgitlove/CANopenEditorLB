@@ -90,6 +90,10 @@ class EditorMainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _create_actions(self) -> None:
+        self._action_new = QAction(self.tr("&New Device…"), self)
+        self._action_new.setShortcut(QKeySequence.StandardKey.New)
+        self._action_new.triggered.connect(self._new_device)
+
         self._action_open = QAction(self.tr("&Open Device…"), self)
         self._action_open.setShortcut(QKeySequence.StandardKey.Open)
         self._action_open.triggered.connect(self._open_device_dialog)
@@ -122,6 +126,7 @@ class EditorMainWindow(QMainWindow):
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu(self.tr("&File"))
+        file_menu.addAction(self._action_new)
         file_menu.addAction(self._action_open)
         self._recent_menu = file_menu.addMenu(self.tr("Open &Recent"))
         file_menu.addSeparator()
@@ -325,12 +330,41 @@ class EditorMainWindow(QMainWindow):
 
     def _default_commands(self) -> List[Command]:
         commands = [
+            Command(self.tr("New Device"), self._new_device, shortcut="Ctrl+N"),
             Command(self.tr("Open Device"), self._open_device_dialog, shortcut="Ctrl+O"),
             Command(self.tr("Export CANopenNode Sources"), self._export_current_session, shortcut="Ctrl+E"),
             Command(self.tr("Toggle Dark Mode"), self._toggle_theme_action, shortcut="Ctrl+Shift+L"),
             Command(self.tr("Show Validation Report"), self._focus_report_dock),
         ]
         return commands
+
+    def _new_device(self) -> None:
+        buttons = (
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel
+        )
+        choice = QMessageBox.question(
+            self,
+            self.tr("Create New Device"),
+            self.tr(
+                "Load minimal standard profile entries?\n\n"
+                "Choose 'Yes' to start with required CiA 301 identity objects,"
+                " 'No' for a completely empty dictionary, or 'Cancel' to abort."
+            ),
+            buttons,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if choice == QMessageBox.StandardButton.Cancel:
+            return
+
+        session = self._network.create_device(include_minimal_profile=choice == QMessageBox.StandardButton.Yes)
+        self._add_session(session)
+        self._status.showMessage(
+            self.tr("Created {name}").format(name=session.identifier),
+            5000,
+        )
 
     def _focus_report_dock(self) -> None:
         self._report_dock.raise_()

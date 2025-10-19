@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from canopen_node_editor.model import ObjectType
 from canopen_node_editor.services import NetworkManager
 
 SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
@@ -34,3 +35,12 @@ def test_open_and_export(tmp_path):
 
     # Exporting clears dirty flag
     assert manager._sessions[session.identifier].dirty is False
+
+
+def test_create_device_with_minimal_profile():
+    manager = NetworkManager()
+    session = manager.create_device(include_minimal_profile=True)
+
+    assert session.source_path is None
+    assert 0x1000 in session.device.objects
+    assert session.device.objects[0x1018].object_type == ObjectType.RECORD

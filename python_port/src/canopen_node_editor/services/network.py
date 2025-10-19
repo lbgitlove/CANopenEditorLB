@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..exporters import export_canopennode_sources
-from ..model import Device
+from ..model import Device, create_empty_device, create_minimal_profile_device
 from ..parsers import parse_eds, parse_xdd
 
 @dataclass
@@ -39,6 +39,15 @@ class NetworkManager:
         session = DeviceSession(identifier=identifier, device=device, source_path=None)
         self._sessions[identifier] = session
         return session
+
+    def create_device(self, include_minimal_profile: bool = False) -> DeviceSession:
+        """Create a new in-memory device, optionally pre-populated with profile data."""
+
+        device = (
+            create_minimal_profile_device() if include_minimal_profile else create_empty_device()
+        )
+        base_identifier = "Minimal Device" if include_minimal_profile else "New Device"
+        return self.register_device(base_identifier, device)
 
     def mark_dirty(self, identifier: str, dirty: bool = True) -> None:
         session = self._require_session(identifier)
