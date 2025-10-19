@@ -11,7 +11,6 @@ from typing import Sequence
 from platformdirs import PlatformDirs
 
 from . import __version__
-from .gui import EditorApplication, EditorMainWindow
 from .services.network import NetworkManager
 from .services.profiles import ProfileRepository
 from .services.settings import SettingsManager
@@ -131,6 +130,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if candidate.exists():
             search_paths.append(candidate)
     profile_repository = ProfileRepository(search_paths)
+
+    try:
+        from .gui import EditorApplication, EditorMainWindow
+    except ModuleNotFoundError as exc:
+        if exc.name == "PySide6":
+            raise RuntimeError(
+                "PySide6 is required to launch the GUI. Install the project dependencies "
+                "using 'pip install -r requirements.txt'."
+            ) from exc
+        raise
 
     app = EditorApplication(normalised_argv, settings)
     window = EditorMainWindow(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QModelIndex, Signal
-from PySide6.QtWidgets import QTreeView, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QPushButton, QTreeView, QWidget, QVBoxLayout
 
 from ...model import Device
 from ..models.object_dictionary import ObjectDictionaryModel, iter_selected_payloads
@@ -13,10 +13,14 @@ class ObjectDictionaryWidget(QWidget):
     """Widget presenting the CANopen object dictionary."""
 
     selectionChanged = Signal(object, object)
+    addEntryRequested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._model = ObjectDictionaryModel(self)
+        self._add_button = QPushButton(self.tr("Add Object"), self)
+        self._add_button.clicked.connect(self.addEntryRequested.emit)
+
         self._tree = QTreeView(self)
         self._tree.setModel(self._model)
         self._tree.setUniformRowHeights(True)
@@ -27,11 +31,13 @@ class ObjectDictionaryWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._add_button)
         layout.addWidget(self._tree)
 
     # ------------------------------------------------------------------
     def set_device(self, device: Device | None) -> None:
         self._model.set_device(device)
+        self._add_button.setEnabled(device is not None)
         self._tree.expandToDepth(0)
         if device:
             self._tree.resizeColumnToContents(0)
@@ -41,6 +47,9 @@ class ObjectDictionaryWidget(QWidget):
 
     def tree(self) -> QTreeView:
         return self._tree
+
+    def can_add_entries(self) -> bool:
+        return self._add_button.isEnabled()
 
     # ------------------------------------------------------------------
     def _on_selection_changed(self, selected, _deselected) -> None:

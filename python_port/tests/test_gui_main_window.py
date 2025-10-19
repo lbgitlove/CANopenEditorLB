@@ -7,6 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+pytest.importorskip("PySide6")
+
 from PySide6.QtWidgets import QMessageBox
 
 from canopen_node_editor.gui.main_window import EditorMainWindow

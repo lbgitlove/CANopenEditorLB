@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..exporters import export_canopennode_sources
-from ..model import Device, create_empty_device, create_minimal_profile_device, merge_devices
+from ..model import (
+    Device,
+    ObjectEntry,
+    create_empty_device,
+    create_minimal_profile_device,
+    merge_devices,
+)
 from ..parsers import parse_eds, parse_xdd
 
 @dataclass
@@ -74,6 +80,30 @@ class NetworkManager:
         session.device = merge_devices(current, template)
         session.dirty = True
         return sorted(updated)
+
+    def insert_object(self, identifier: str, entry: ObjectEntry, *, replace: bool = False) -> None:
+        """Insert a new object dictionary entry into the session.
+
+        Parameters
+        ----------
+        identifier:
+            Session identifier returned by :meth:`open_device` or
+            :meth:`create_device`.
+        entry:
+            Fully populated :class:`~canopen_node_editor.model.ObjectEntry`
+            instance to add to the device.
+        replace:
+            When ``True`` an existing entry with the same index will be
+            overwritten. The default value (``False``) raises a ``ValueError``
+            instead to prevent accidental data loss.
+        """
+
+        session = self._require_session(identifier)
+        if not replace and entry.index in session.device.objects:
+            raise ValueError(f"Object 0x{entry.index:04X} already exists")
+
+        session.device.objects[entry.index] = entry
+        session.dirty = True
 
     def mark_dirty(self, identifier: str, dirty: bool = True) -> None:
         session = self._require_session(identifier)

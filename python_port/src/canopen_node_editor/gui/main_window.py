@@ -9,6 +9,7 @@ from PySide6.QtCore import QByteArray, QLocale, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QDialog,
     QDockWidget,
     QMainWindow,
     QMenu,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 from ..services.network import DeviceSession, NetworkManager
 from ..services.profiles import ProfileRepository
 from ..services.settings import SettingsManager
+from .dialogs import AddObjectDialog
 from .widgets.command_palette import Command, CommandPalette
 from .widgets.device_page import DeviceEditorPage
 from .widgets.object_dictionary import ObjectDictionaryWidget
@@ -87,6 +89,7 @@ class EditorMainWindow(QMainWindow):
         self._restore_window_state()
         self._refresh_recent_files()
         self._object_view.selectionChanged.connect(self._property_view.display)
+        self._object_view.addEntryRequested.connect(self._add_object_entry)
 
     # ------------------------------------------------------------------
     def _create_actions(self) -> None:
@@ -334,6 +337,7 @@ class EditorMainWindow(QMainWindow):
             Command(self.tr("New Device"), self._new_device, shortcut="Ctrl+N"),
             Command(self.tr("Open Device"), self._open_device_dialog, shortcut="Ctrl+O"),
             Command(self.tr("Export CANopenNode Sources"), self._export_current_session, shortcut="Ctrl+E"),
+            Command(self.tr("Add Object Entry"), self._add_object_entry, shortcut="Ctrl+Shift+N"),
             Command(self.tr("Toggle Dark Mode"), self._toggle_theme_action, shortcut="Ctrl+Shift+L"),
             Command(self.tr("Show Validation Report"), self._focus_report_dock),
         ]
@@ -373,6 +377,42 @@ class EditorMainWindow(QMainWindow):
         indexes = ", ".join(f"0x{index:04X}" for index in updated)
         self._status.showMessage(
             self.tr("Added missing mandatory objects: {indexes}").format(indexes=indexes), 7000
+        )
+
+    def _current_session(self) -> DeviceSession | None:
+        widget = self._tabs.currentWidget()
+        page = widget if isinstance(widget, DeviceEditorPage) else None
+        if page is None:
+            return None
+        return self._pages.get(page)
+
+    def _add_object_entry(self) -> None:
+        session = self._current_session()
+        if session is None:
+            return
+
+        dialog = AddObjectDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        request = dialog.request()
+        if request is None:
+            return
+
+        entry = AddObjectDialog.create_entry(request)
+        try:
+            self._network.insert_object(session.identifier, entry)
+        except ValueError as exc:
+            QMessageBox.warning(self, self.tr("Unable to add object"), str(exc))
+            return
+
+        page = self._tabs.currentWidget()
+        if isinstance(page, DeviceEditorPage):
+            page.set_device(session.device)
+        self._update_context_widgets()
+        self._status.showMessage(
+            self.tr("Added object 0x{index:04X}").format(index=entry.index),
+            5000,
         )
 
     def _new_device(self) -> None:
