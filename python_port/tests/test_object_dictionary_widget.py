@@ -20,6 +20,7 @@ def test_object_dictionary_widget_loads_xdd(qtbot):
     widget.set_device(device)
 
     model = widget.model()
+    assert model.columnCount() == 6
     indices = {model.item(row, 0).text() for row in range(model.rowCount())}
 
     assert "0x1000" in indices
@@ -39,3 +40,25 @@ def test_add_entry_button_disabled_without_device(qtbot):
     widget.set_device(device)
 
     assert widget.can_add_entries() is True
+
+
+@pytest.mark.qt
+def test_editing_value_updates_device_model(qtbot):
+    xdd_path = SAMPLES / "demo_device.xdd"
+    device = parse_xdd(xdd_path)
+
+    widget = ObjectDictionaryWidget()
+    qtbot.addWidget(widget)
+    widget.set_device(device)
+
+    model = widget.model()
+    row_index = next(
+        row for row in range(model.rowCount()) if model.item(row, 0).text() == "0x1000"
+    )
+    value_index = model.index(row_index, 4)
+
+    assert device.get_object(0x1000).value is None
+
+    model.setData(value_index, "0x12345678")
+
+    assert device.get_object(0x1000).value == "0x12345678"

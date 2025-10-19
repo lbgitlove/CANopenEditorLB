@@ -28,6 +28,7 @@ class ObjectDictionaryWidget(QWidget):
         self._tree.setRootIsDecorated(True)
         self._tree.expandAll()
         self._tree.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self._model.valueEdited.connect(self._on_value_edited)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -56,6 +57,18 @@ class ObjectDictionaryWidget(QWidget):
         indexes = selected.indexes()
         for entry, sub in iter_selected_payloads(indexes, self._model):
             self.selectionChanged.emit(entry, sub)
+
+    def _on_value_edited(self, entry, sub) -> None:
+        selection_model = self._tree.selectionModel()
+        if selection_model is None:
+            return
+        selected = list(
+            iter_selected_payloads(selection_model.selectedIndexes(), self._model)
+        )
+        for current_entry, current_sub in selected:
+            if current_entry is entry and current_sub is sub:
+                self.selectionChanged.emit(entry, sub)
+                break
 
     def select_first_row(self) -> None:
         if self._model.rowCount() == 0:
