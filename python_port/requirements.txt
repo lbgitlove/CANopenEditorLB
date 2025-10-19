@@ -1,0 +1,3 @@
+-e ./python_port
+pytest
+pytest-qt

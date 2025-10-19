@@ -1,0 +1,29 @@
+<DeviceProfile xmlns="http://www.canopen.org/xml/CANopenDeviceProfile">
+  <ProfileBody>
+    <ApplicationLayers>
+      <DeviceIdentity>
+        <VendorName>Example Corp</VendorName>
+        <ProductName>Mixed Case Device</ProductName>
+      </DeviceIdentity>
+      <ObjectDictionary>
+        <ObjectList>
+          <Object Index="0x2000" ObjectType="7">
+            <Name>Case Variant Object</Name>
+            <DataType>UNSIGNED16</DataType>
+            <AccessType>rw</AccessType>
+          </Object>
+          <Object index="0x2200" objectType="9">
+            <Name>Another Object</Name>
+            <SubObjectList>
+              <SubObject SubIndex="0">
+                <Name>Entries</Name>
+                <DataType>UNSIGNED8</DataType>
+                <AccessType>ro</AccessType>
+              </SubObject>
+            </SubObjectList>
+          </Object>
+        </ObjectList>
+      </ObjectDictionary>
+    </ApplicationLayers>
+  </ProfileBody>
+</DeviceProfile>

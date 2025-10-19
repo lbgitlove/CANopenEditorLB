@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DeviceProfile xmlns="http://www.canopen.org/xml/CANopenDeviceProfile">
+  <ProfileBody>
+    <DeviceIdentity>
+      <VendorName>OpenAI Automation</VendorName>
+      <VendorID>0x1234</VendorID>
+      <ProductName>Demo Device</ProductName>
+      <ProductNumber>0x0001</ProductNumber>
+      <RevisionNumber>0x00000001</RevisionNumber>
+      <OrderNumber>DEMO-1</OrderNumber>
+    </DeviceIdentity>
+    <DeviceManager>
+      <ObjectList>
+        <Object index="0x1000" objectType="7">
+          <Name>Device Type</Name>
+          <DataType>UNSIGNED32</DataType>
+          <AccessType>ro</AccessType>
+          <DefaultValue>0x00000000</DefaultValue>
+        </Object>
+        <Object index="0x1001" objectType="7">
+          <Name>Error Register</Name>
+          <DataType>UNSIGNED8</DataType>
+          <AccessType>ro</AccessType>
+          <DefaultValue>0</DefaultValue>
+        </Object>
+        <Object index="0x1600" objectType="9">
+          <Name>TPDO Mapping</Name>
+          <SubObjectList>
+            <SubObject subIndex="0">
+              <Name>Number of mapped objects</Name>
+              <DataType>UNSIGNED8</DataType>
+              <AccessType>rw</AccessType>
+              <DefaultValue>0</DefaultValue>
+              <LowLimit>0</LowLimit>
+              <HighLimit>8</HighLimit>
+            </SubObject>
+            <SubObject subIndex="1">
+              <Name>Mapped object 1</Name>
+              <DataType>UNSIGNED32</DataType>
+              <AccessType>rw</AccessType>
+              <DefaultValue>0</DefaultValue>
+            </SubObject>
+          </SubObjectList>
+        </Object>
+      </ObjectList>
+    </DeviceManager>
+  </ProfileBody>
+</DeviceProfile>
