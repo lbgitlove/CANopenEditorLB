@@ -46,13 +46,14 @@ def test_main_window_populates_views(qtbot, settings_manager, sample_device):
     window.show()
 
     window.add_session(session)
-    qtbot.waitUntil(lambda: window._object_view.model().rowCount() > 0, timeout=2000)
-
-    assert window._object_view.model().rowCount() > 0
-    assert window._property_view.current_entry() is not None
     page = window._tabs.currentWidget()
     assert isinstance(page, DeviceEditorPage)
-    assert window._report_view.issues() == page.issues
+
+    qtbot.waitUntil(lambda: page.object_dictionary.model().rowCount() > 0, timeout=2000)
+
+    assert page.object_dictionary.model().rowCount() > 0
+    assert page.object_editor.current_entry() is not None
+    assert page.report_view.issues() == page.issues
 
 
 @pytest.mark.usefixtures("qapp")
@@ -119,7 +120,13 @@ def test_incomplete_xdd_populates_tree(monkeypatch, qtbot, settings_manager):
 
     window.add_session(session)
 
-    qtbot.waitUntil(lambda: window._object_view.model().rowCount() > 0, timeout=2000)
+    page = window._tabs.currentWidget()
+    assert isinstance(page, DeviceEditorPage)
 
-    rows = [window._object_view.model().item(row, 0).text() for row in range(window._object_view.model().rowCount())]
+    qtbot.waitUntil(lambda: page.object_dictionary.model().rowCount() > 0, timeout=2000)
+
+    rows = [
+        page.object_dictionary.model().item(row, 0).text()
+        for row in range(page.object_dictionary.model().rowCount())
+    ]
     assert "0x2000" in rows

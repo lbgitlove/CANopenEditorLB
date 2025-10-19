@@ -18,10 +18,18 @@ class ObjectDictionaryModel(QStandardItemModel):
 
     valueEdited = Signal(object, object)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        *,
+        include_subindices: bool = True,
+        editable: bool = True,
+    ) -> None:
         super().__init__(parent)
         self.setHorizontalHeaderLabels([self.tr(text) for text in self.COLUMN_HEADERS])
         self._device: Device | None = None
+        self._include_subindices = include_subindices
+        self._editable = editable
 
     def set_device(self, device: Device | None) -> None:
         self._device = device
@@ -39,7 +47,7 @@ class ObjectDictionaryModel(QStandardItemModel):
         for entry in self._device.all_entries():
             parent = self._create_entry_item(entry)
             self.appendRow(parent)
-            if entry.sub_objects:
+            if self._include_subindices and entry.sub_objects:
                 for subindex, sub in sorted(entry.sub_objects.items()):
                     child_items = self._create_sub_item(entry, subindex, sub)
                     parent[0].appendRow(child_items)
@@ -65,8 +73,9 @@ class ObjectDictionaryModel(QStandardItemModel):
             (value_item, "value"),
             (default_item, "default"),
         ):
-            item.setEditable(True)
-            item.setData((entry, None, field), self._FIELD_ROLE)
+            item.setEditable(self._editable)
+            if self._editable:
+                item.setData((entry, None, field), self._FIELD_ROLE)
 
         if entry.value is None and entry.default is None:
             # Highlight entries that still require configuration.
@@ -95,8 +104,9 @@ class ObjectDictionaryModel(QStandardItemModel):
             (value_item, "value"),
             (default_item, "default"),
         ):
-            item.setEditable(True)
-            item.setData((entry, sub, field), self._FIELD_ROLE)
+            item.setEditable(self._editable)
+            if self._editable:
+                item.setData((entry, sub, field), self._FIELD_ROLE)
 
         if sub.pdo_mapping:
             name_item.setData(self._pdo_brush(), Qt.ForegroundRole)
@@ -121,6 +131,12 @@ class ObjectDictionaryModel(QStandardItemModel):
                     setattr(setattr_target, field, text or None)
                     self.valueEdited.emit(entry, sub)
         return super().setData(index, value, role)
+
+    # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        """Rebuild the model preserving the currently loaded device."""
+
+        self._refresh()
 
     def _pending_brush(self):
         from PySide6.QtGui import QBrush, QColor
