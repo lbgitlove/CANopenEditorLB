@@ -2,10 +2,78 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from dataclasses import dataclass, field
+from functools import partial
 
-from ...model import Device, ObjectEntry, SubObject
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QGroupBox,
+    QHeaderView,
+    QListWidget,
+    QListWidgetItem,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ...model import Device, ObjectEntry, PDOMapping, SubObject
+
+
+_DATA_TYPE_BIT_LENGTH = {
+    # Integer types -----------------------------------------------------
+    # fmt: off
+    # Signed
+    "INTEGER8": 8,
+    "INTEGER16": 16,
+    "INTEGER32": 32,
+    "INTEGER40": 40,
+    "INTEGER48": 48,
+    "INTEGER56": 56,
+    "INTEGER64": 64,
+    "INTEGER24": 24,
+    # Unsigned
+    "UNSIGNED8": 8,
+    "UNSIGNED16": 16,
+    "UNSIGNED24": 24,
+    "UNSIGNED32": 32,
+    "UNSIGNED40": 40,
+    "UNSIGNED48": 48,
+    "UNSIGNED56": 56,
+    "UNSIGNED64": 64,
+    # Boolean and floating point
+    "BOOLEAN": 1,
+    "REAL32": 32,
+    "REAL64": 64,
+    # fmt: on
+}
+
+
+@dataclass
+class _PDODescriptor:
+    """Pairing of communication and mapping entries for a PDO."""
+
+    number: int
+    communication: ObjectEntry | None = None
+    mapping: ObjectEntry | None = None
+
+
+@dataclass
+class _PDOSection:
+    """Widget bundle and metadata for a PDO direction."""
+
+    title: str
+    container: QWidget
+    selector: QListWidget
+    communication: QTableWidget
+    mapping: QTableWidget
+    communication_start: int
+    communication_end: int
+    mapping_start: int
+    mapping_end: int
+    descriptors: list[_PDODescriptor] = field(default_factory=list)
 
 
 class PDOEditorWidget(QWidget):
@@ -13,46 +81,495 @@ class PDOEditorWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._tpdo = QTableWidget(0, 3, self)
-        self._rpdo = QTableWidget(0, 3, self)
+        self._device: Device | None = None
+        self._field_role = Qt.UserRole + 1
 
-        for table, label in ((self._tpdo, self.tr("TPDO")), (self._rpdo, self.tr("RPDO"))):
-            table.setHorizontalHeaderLabels([label, self.tr("Index"), self.tr("Name")])
-            table.verticalHeader().setVisible(False)
-            table.setEditTriggers(QTableWidget.NoEditTriggers)
-            table.setSelectionBehavior(QTableWidget.SelectRows)
+        tpdo_section = self._build_section(
+            title=self.tr("TPDO"),
+            communication_range=(0x1800, 0x19FF),
+            mapping_range=(0x1A00, 0x1BFF),
+        )
+        rpdo_section = self._build_section(
+            title=self.tr("RPDO"),
+            communication_range=(0x1400, 0x15FF),
+            mapping_range=(0x1600, 0x17FF),
+        )
+
+        self._sections: dict[PDOMapping, _PDOSection] = {
+            PDOMapping.TPDO: tpdo_section,
+            PDOMapping.RPDO: rpdo_section,
+        }
 
         splitter = QSplitter(Qt.Horizontal, self)
-        splitter.addWidget(self._tpdo)
-        splitter.addWidget(self._rpdo)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(tpdo_section.container)
+        splitter.addWidget(rpdo_section.container)
 
         layout = QVBoxLayout(self)
         layout.addWidget(splitter)
 
-    def set_device(self, device: Device | None) -> None:
-        self._populate_table(self._tpdo, device, include="TRANSMIT")
-        self._populate_table(self._rpdo, device, include="RECEIVE")
+        for section in self._sections.values():
+            for table in (section.communication, section.mapping):
+                self._configure_table(table)
+            section.selector.currentRowChanged.connect(
+                partial(self._on_selector_changed, section)
+            )
 
-    def _populate_table(self, table: QTableWidget, device: Device | None, include: str) -> None:
-        table.clearContents()
+    # ------------------------------------------------------------------
+    def set_device(self, device: Device | None) -> None:
+        self._device = device
+        for mapping_type, section in self._sections.items():
+            previous = self._selected_descriptor(section)
+            section.descriptors = self._collect_descriptors(section, device)
+            self._populate_selector(section)
+            target_number = previous.number if previous is not None else None
+            self._restore_selection(section, target_number)
+            self._populate_section_tables(mapping_type)
+
+    # ------------------------------------------------------------------
+    def tpdo_selector(self) -> QListWidget:
+        return self._sections[PDOMapping.TPDO].selector
+
+    def rpdo_selector(self) -> QListWidget:
+        return self._sections[PDOMapping.RPDO].selector
+
+    def tpdo_mapping_view(self) -> QTableWidget:
+        return self._sections[PDOMapping.TPDO].mapping
+
+    def tpdo_communication_view(self) -> QTableWidget:
+        return self._sections[PDOMapping.TPDO].communication
+
+    def rpdo_mapping_view(self) -> QTableWidget:
+        return self._sections[PDOMapping.RPDO].mapping
+
+    def rpdo_communication_view(self) -> QTableWidget:
+        return self._sections[PDOMapping.RPDO].communication
+
+    # ------------------------------------------------------------------
+    def _on_selector_changed(self, section: _PDOSection, _row: int) -> None:
+        mapping_type = self._mapping_type_for_section(section)
+        if mapping_type is None:
+            return
+        self._populate_section_tables(mapping_type)
+
+    def _mapping_type_for_section(
+        self, target: _PDOSection
+    ) -> PDOMapping | None:
+        for mapping_type, section in self._sections.items():
+            if section is target:
+                return mapping_type
+        return None
+
+    # ------------------------------------------------------------------
+    def _build_section(
+        self,
+        *,
+        title: str,
+        communication_range: tuple[int, int],
+        mapping_range: tuple[int, int],
+    ) -> _PDOSection:
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        splitter = QSplitter(Qt.Horizontal, container)
+        splitter.setChildrenCollapsible(False)
+        layout.addWidget(splitter)
+
+        selector_group = QGroupBox(
+            self.tr("{title} Channels").format(title=title), splitter
+        )
+        selector_layout = QVBoxLayout(selector_group)
+        selector_layout.setContentsMargins(0, 0, 0, 0)
+        selector = QListWidget(selector_group)
+        selector.setSelectionMode(QListWidget.SingleSelection)
+        selector_layout.addWidget(selector)
+        splitter.addWidget(selector_group)
+
+        detail_container = QWidget(splitter)
+        detail_layout = QVBoxLayout(detail_container)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+
+        comm_group = QGroupBox(
+            self.tr("{title} Communication Parameters").format(title=title),
+            detail_container,
+        )
+        comm_layout = QVBoxLayout(comm_group)
+        comm_table = self._create_table()
+        comm_layout.addWidget(comm_table)
+        detail_layout.addWidget(comm_group)
+
+        mapping_group = QGroupBox(
+            self.tr("{title} Mapping Parameters").format(title=title),
+            detail_container,
+        )
+        mapping_layout = QVBoxLayout(mapping_group)
+        mapping_table = self._create_table()
+        mapping_layout.addWidget(mapping_table)
+        detail_layout.addWidget(mapping_group)
+
+        detail_layout.addStretch(1)
+
+        splitter.addWidget(detail_container)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+
+        return _PDOSection(
+            title=title,
+            container=container,
+            selector=selector,
+            communication=comm_table,
+            mapping=mapping_table,
+            communication_start=communication_range[0],
+            communication_end=communication_range[1],
+            mapping_start=mapping_range[0],
+            mapping_end=mapping_range[1],
+        )
+
+    def _create_table(self) -> QTableWidget:
+        table = QTableWidget(0, 5, self)
+        table.setHorizontalHeaderLabels(
+            [
+                self.tr("Index"),
+                self.tr("SubIndex"),
+                self.tr("Name"),
+                self.tr("Value"),
+                self.tr("Default"),
+            ]
+        )
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        return table
+
+    def _configure_table(self, table: QTableWidget) -> None:
+        triggers = (
+            QTableWidget.DoubleClicked
+            | QTableWidget.EditKeyPressed
+            | QTableWidget.SelectedClicked
+        )
+        table.setEditTriggers(triggers)
+        table.itemChanged.connect(partial(self._on_table_item_changed, table))
+
+    # ------------------------------------------------------------------
+    def _collect_descriptors(
+        self, section: _PDOSection, device: Device | None
+    ) -> list[_PDODescriptor]:
         if device is None:
-            table.setRowCount(0)
+            return []
+        descriptors: dict[int, _PDODescriptor] = {}
+        for entry in device.all_entries():
+            index = entry.index
+            if section.communication_start <= index <= section.communication_end:
+                number = index - section.communication_start
+                descriptor = descriptors.setdefault(number, _PDODescriptor(number))
+                descriptor.communication = entry
+            elif section.mapping_start <= index <= section.mapping_end:
+                number = index - section.mapping_start
+                descriptor = descriptors.setdefault(number, _PDODescriptor(number))
+                descriptor.mapping = entry
+        return [descriptors[key] for key in sorted(descriptors)]
+
+    def _populate_selector(self, section: _PDOSection) -> None:
+        section.selector.blockSignals(True)
+        section.selector.clear()
+        for descriptor in section.descriptors:
+            label = self._format_descriptor(section, descriptor)
+            item = QListWidgetItem(label)
+            item.setData(self._field_role, descriptor)
+            section.selector.addItem(item)
+        section.selector.blockSignals(False)
+
+    def _format_descriptor(self, section: _PDOSection, descriptor: _PDODescriptor) -> str:
+        number = descriptor.number + 1
+        parts = [self.tr("{title} {number}").format(title=section.title, number=number)]
+        if descriptor.communication is not None:
+            parts.append(f"0x{descriptor.communication.index:04X}")
+        if descriptor.mapping is not None:
+            parts.append(f"0x{descriptor.mapping.index:04X}")
+        return " – ".join(parts)
+
+    def _restore_selection(self, section: _PDOSection, number: int | None) -> None:
+        if section.selector.count() == 0:
+            self._clear_table(section.communication)
+            self._clear_table(section.mapping)
+            return
+        if number is None:
+            section.selector.setCurrentRow(0)
+            return
+        for row in range(section.selector.count()):
+            item = section.selector.item(row)
+            descriptor = item.data(self._field_role)
+            if isinstance(descriptor, _PDODescriptor) and descriptor.number == number:
+                section.selector.setCurrentRow(row)
+                return
+        section.selector.setCurrentRow(0)
+
+    def _selected_descriptor(self, section: _PDOSection) -> _PDODescriptor | None:
+        item = section.selector.currentItem()
+        if item is None:
+            return None
+        descriptor = item.data(self._field_role)
+        if isinstance(descriptor, _PDODescriptor):
+            return descriptor
+        return None
+
+    def _populate_section_tables(self, mapping_type: PDOMapping) -> None:
+        section = self._sections[mapping_type]
+        descriptor = self._selected_descriptor(section)
+        self._populate_entry_table(
+            section.communication,
+            descriptor,
+            kind="communication",
+            mapping_type=mapping_type,
+        )
+        self._populate_entry_table(
+            section.mapping,
+            descriptor,
+            kind="mapping",
+            mapping_type=mapping_type,
+        )
+
+    def _populate_entry_table(
+        self,
+        table: QTableWidget,
+        descriptor: _PDODescriptor | None,
+        *,
+        kind: str,
+        mapping_type: PDOMapping,
+    ) -> None:
+        table.blockSignals(True)
+        table.setRowCount(0)
+        if descriptor is None:
+            table.blockSignals(False)
             return
 
-        entries: list[tuple[str, ObjectEntry, SubObject | None]] = []
-        for entry in device.all_entries():
-            if entry.pdo_mapping and include in entry.pdo_mapping.name:
-                entries.append((entry.pdo_mapping.name, entry, None))
-            for sub in entry.sub_objects.values():
-                if sub.pdo_mapping and include in sub.pdo_mapping.name:
-                    entries.append((sub.pdo_mapping.name, entry, sub))
+        entry = descriptor.communication if kind == "communication" else descriptor.mapping
+        rows: list[tuple[ObjectEntry, SubObject | None]] = []
+        if entry is not None:
+            if entry.sub_objects:
+                for subindex, sub in sorted(entry.sub_objects.items()):
+                    rows.append((entry, sub))
+            else:
+                rows.append((entry, None))
+        mapping_options: list[tuple[ObjectEntry, SubObject | None]] | None = None
+        if kind == "mapping":
+            mapping_options = self._collect_mappable_entries(mapping_type)
+        self._fill_rows(
+            table,
+            rows,
+            mapping_entry=entry if kind == "mapping" else None,
+            mapping_options=mapping_options,
+        )
+        table.blockSignals(False)
 
+    def _clear_table(self, table: QTableWidget) -> None:
+        table.blockSignals(True)
+        table.setRowCount(0)
+        table.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _fill_rows(
+        self,
+        table: QTableWidget,
+        entries: list[tuple[ObjectEntry, SubObject | None]],
+        *,
+        mapping_entry: ObjectEntry | None = None,
+        mapping_options: list[tuple[ObjectEntry, SubObject | None]] | None = None,
+    ) -> None:
+        table.blockSignals(True)
         table.setRowCount(len(entries))
-        for row, (mapping, entry, sub) in enumerate(entries):
-            mapping_item = QTableWidgetItem(mapping)
+        for row, (entry, sub) in enumerate(entries):
             index_item = QTableWidgetItem(f"0x{entry.index:04X}")
-            name = sub.name if sub else entry.name
-            name_item = QTableWidgetItem(name)
-            table.setItem(row, 0, mapping_item)
-            table.setItem(row, 1, index_item)
-            table.setItem(row, 2, name_item)
+            subindex_text = f"{sub.key.subindex:02X}" if sub else "-"
+            subindex_item = QTableWidgetItem(subindex_text)
+            name_item = QTableWidgetItem(sub.name if sub else entry.name)
+            value_item = QTableWidgetItem(self._value_text(entry, sub))
+            default_item = QTableWidgetItem(self._default_text(entry, sub))
+
+            columns = [
+                (index_item, None),
+                (subindex_item, None),
+                (name_item, "name"),
+                (value_item, "value"),
+                (default_item, "default"),
+            ]
+
+            for column, (item, field) in enumerate(columns):
+                if field is None:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                else:
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    item.setData(self._field_role, (entry, sub, field))
+                table.setItem(row, column, item)
+
+            if (
+                mapping_entry is not None
+                and mapping_options is not None
+                and entry.index == mapping_entry.index
+                and (sub is not None or not entry.sub_objects)
+                and self._target_from(entry, sub) is not None
+            ):
+                self._attach_mapping_selector(
+                    table,
+                    row,
+                    value_item,
+                    entry,
+                    sub,
+                    mapping_options,
+                )
+        table.blockSignals(False)
+
+    def _collect_mappable_entries(
+        self, mapping_type: PDOMapping
+    ) -> list[tuple[ObjectEntry, SubObject | None]]:
+        if self._device is None:
+            return []
+        section = self._sections[mapping_type]
+        entries: list[tuple[ObjectEntry, SubObject | None]] = []
+        for entry in self._device.all_entries():
+            if section.mapping_start <= entry.index <= section.mapping_end:
+                continue
+            if entry.pdo_mapping == mapping_type:
+                entries.append((entry, None))
+            for subindex, sub in sorted(entry.sub_objects.items()):
+                if sub.pdo_mapping == mapping_type:
+                    entries.append((entry, sub))
+        return entries
+
+    def _value_text(self, entry: ObjectEntry, sub: SubObject | None) -> str:
+        if sub and sub.value:
+            return sub.value
+        if not sub and entry.value:
+            return entry.value
+        if sub and sub.default:
+            return sub.default
+        if entry.default:
+            return entry.default
+        return ""
+
+    def _default_text(self, entry: ObjectEntry, sub: SubObject | None) -> str:
+        if sub and sub.default:
+            return sub.default
+        if not sub and entry.default:
+            return entry.default
+        return ""
+
+    def _on_table_item_changed(self, table: QTableWidget, item: QTableWidgetItem) -> None:
+        payload = item.data(self._field_role)
+        if not isinstance(payload, tuple) or len(payload) != 3:
+            return
+        entry, sub, field = payload
+        text = item.text().strip()
+        target = sub or entry
+        setattr(target, field, text or None)
+
+    # ------------------------------------------------------------------
+    def _attach_mapping_selector(
+        self,
+        table: QTableWidget,
+        row: int,
+        value_item: QTableWidgetItem,
+        entry: ObjectEntry,
+        sub: SubObject | None,
+        options: list[tuple[ObjectEntry, SubObject | None]],
+    ) -> None:
+        target = self._target_from(entry, sub)
+        if target is None:
+            return
+
+        combo = QComboBox(table)
+        combo.setEditable(False)
+
+        combo.addItem(self.tr("Not mapped"), None)
+        for option_entry, option_sub in options:
+            option_target = self._target_from(option_entry, option_sub)
+            if option_target is None:
+                continue
+            mapping_value = self._encode_mapping_value(option_entry, option_sub)
+            if mapping_value is None:
+                continue
+            label = self._format_mapping_option(option_entry, option_sub, mapping_value)
+            combo.addItem(label, mapping_value)
+
+        current_value = target.value or target.default
+        if current_value:
+            normalized = self._normalise_mapping_value(current_value)
+            index = combo.findData(normalized)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+        combo.currentIndexChanged.connect(
+            lambda _index, item=value_item, target=target, widget=combo: self._on_mapping_changed(
+                item, target, widget
+            )
+        )
+
+        value_item.setFlags(value_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        table.setCellWidget(row, 3, combo)
+
+    def _format_mapping_option(
+        self,
+        entry: ObjectEntry,
+        sub: SubObject | None,
+        mapping_value: str,
+    ) -> str:
+        subindex = sub.key.subindex if sub else 0
+        name = sub.name if sub else entry.name
+        bits = self._bit_length(entry, sub)
+        detail = f"{bits} bit" if bits == 1 else f"{bits} bits" if bits else self.tr("unknown")
+        return self.tr("0x{index:04X}:{sub:02X} – {name} ({detail})").format(
+            index=entry.index,
+            sub=subindex,
+            name=name,
+            detail=detail,
+        )
+
+    def _on_mapping_changed(
+        self, item: QTableWidgetItem, target: ObjectEntry | SubObject, combo: QComboBox
+    ) -> None:
+        data = combo.currentData()
+        if data is None:
+            target.value = None
+            item.setText("")
+            return
+        target.value = data
+        item.setText(data)
+
+    def _target_from(
+        self, entry: ObjectEntry, sub: SubObject | None
+    ) -> ObjectEntry | SubObject | None:
+        if sub is not None:
+            return sub
+        if entry.sub_objects:
+            return None
+        return entry
+
+    def _encode_mapping_value(
+        self, entry: ObjectEntry, sub: SubObject | None
+    ) -> str | None:
+        bits = self._bit_length(entry, sub)
+        if bits is None:
+            return None
+        subindex = sub.key.subindex if sub else 0
+        value = (entry.index << 16) | (subindex << 8) | bits
+        return f"0x{value:08X}"
+
+    def _normalise_mapping_value(self, value: str) -> str:
+        try:
+            numeric = int(value, 0)
+        except ValueError:
+            return value
+        return f"0x{numeric:08X}"
+
+    def _bit_length(self, entry: ObjectEntry, sub: SubObject | None) -> int | None:
+        target = sub or entry
+        data_type = target.data_type
+        if data_type is None:
+            return None
+        return _DATA_TYPE_BIT_LENGTH.get(data_type.name)

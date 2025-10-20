@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from canopen_node_editor.model import ObjectType
+from pathlib import Path
+
+import pytest
+
+from canopen_node_editor.model import AccessType, DataType, ObjectEntry, ObjectType
 from canopen_node_editor.services import NetworkManager
 
 SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
@@ -58,3 +62,23 @@ def test_apply_minimal_profile_adds_missing_objects():
 
     # Running the fix again should not report additional changes.
     assert manager.apply_minimal_profile(session.identifier) == []
+
+
+def test_insert_object_rejects_duplicates():
+    manager = NetworkManager()
+    session = manager.create_device()
+
+    entry = ObjectEntry(
+        index=0x2000,
+        name="Vendor Specific",
+        object_type=ObjectType.VAR,
+        data_type=DataType.UNSIGNED32,
+        access_type=AccessType.RW,
+    )
+
+    manager.insert_object(session.identifier, entry)
+    assert 0x2000 in session.device.objects
+    assert session.dirty is True
+
+    with pytest.raises(ValueError):
+        manager.insert_object(session.identifier, entry)

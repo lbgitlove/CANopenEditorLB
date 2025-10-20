@@ -2,10 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from canopen_node_editor.model import ObjectType
+from canopen_node_editor.model import AccessType, DataType, ObjectType, PDOMapping
 from canopen_node_editor.parsers import XDDParseWarning, parse_xdd, serialize_device_to_xdd
 
 SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "od_examples"
 
 
 def test_parse_xdd_and_serialise(tmp_path):
@@ -96,3 +97,20 @@ def test_parse_xdd_with_mixed_case_attributes():
 
     indices = {entry.index for entry in device.all_entries()}
     assert indices.issuperset({0x2000, 0x2200})
+
+
+def test_parse_reference_od_from_csharp_editor():
+    xdd_path = EXAMPLES / "od.xdd"
+    device = parse_xdd(xdd_path)
+
+    assert device.info.product_name == "minimal_test"
+    assert device.objects[0x1001].default == "0x00"
+    assert device.objects[0x1005].pdo_mapping == PDOMapping.NONE
+
+    error_array = device.objects[0x1003]
+    assert error_array.object_type == ObjectType.ARRAY
+    assert len(error_array.sub_objects) == 17
+    first_sub = error_array.sub_objects[0]
+    assert first_sub.name == "Number of errors"
+    assert first_sub.data_type == DataType.UNSIGNED8
+    assert first_sub.access_type == AccessType.RW

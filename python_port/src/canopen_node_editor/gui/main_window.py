@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List
+from typing import Callable, Dict, List
 
-from PySide6.QtCore import QByteArray, QLocale, Qt
+from PySide6.QtCore import QByteArray, QLocale
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
-    QDockWidget,
+    QDialog,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -20,12 +20,9 @@ from PySide6.QtWidgets import (
 from ..services.network import DeviceSession, NetworkManager
 from ..services.profiles import ProfileRepository
 from ..services.settings import SettingsManager
+from .dialogs import AddObjectDialog
 from .widgets.command_palette import Command, CommandPalette
 from .widgets.device_page import DeviceEditorPage
-from .widgets.object_dictionary import ObjectDictionaryWidget
-from .widgets.pdo_editor import PDOEditorWidget
-from .widgets.property_inspector import PropertyInspectorWidget
-from .widgets.report_viewer import ReportViewerWidget
 
 
 class EditorMainWindow(QMainWindow):
@@ -55,27 +52,6 @@ class EditorMainWindow(QMainWindow):
         self._tabs.tabCloseRequested.connect(self._close_tab)
         self.setCentralWidget(self._tabs)
 
-        self._object_dock = QDockWidget(self.tr("Object Dictionary"), self)
-        self._object_view = ObjectDictionaryWidget(self._object_dock)
-        self._object_dock.setWidget(self._object_view)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self._object_dock)
-
-        self._property_dock = QDockWidget(self.tr("Properties"), self)
-        self._property_view = PropertyInspectorWidget(self._property_dock)
-        self._property_dock.setWidget(self._property_view)
-        self.addDockWidget(Qt.RightDockWidgetArea, self._property_dock)
-
-        self._pdo_dock = QDockWidget(self.tr("PDO Editor"), self)
-        self._pdo_view = PDOEditorWidget(self._pdo_dock)
-        self._pdo_dock.setWidget(self._pdo_view)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self._pdo_dock)
-
-        self._report_dock = QDockWidget(self.tr("Validation Report"), self)
-        self._report_view = ReportViewerWidget(self._report_dock)
-        self._report_dock.setWidget(self._report_view)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self._report_dock)
-        self.tabifyDockWidget(self._pdo_dock, self._report_dock)
-
         self._pages: Dict[DeviceEditorPage, DeviceSession] = {}
 
         self._status = QStatusBar(self)
@@ -86,7 +62,6 @@ class EditorMainWindow(QMainWindow):
         self._register_signals()
         self._restore_window_state()
         self._refresh_recent_files()
-        self._object_view.selectionChanged.connect(self._property_view.display)
 
     # ------------------------------------------------------------------
     def _create_actions(self) -> None:
@@ -137,11 +112,6 @@ class EditorMainWindow(QMainWindow):
         file_menu.addAction(self._action_exit)
 
         view_menu = menu_bar.addMenu(self.tr("&View"))
-        view_menu.addAction(self._object_dock.toggleViewAction())
-        view_menu.addAction(self._property_dock.toggleViewAction())
-        view_menu.addAction(self._pdo_dock.toggleViewAction())
-        view_menu.addAction(self._report_dock.toggleViewAction())
-        view_menu.addSeparator()
         view_menu.addAction(self._action_toggle_theme)
 
         tools_menu = menu_bar.addMenu(self.tr("&Tools"))
@@ -208,6 +178,7 @@ class EditorMainWindow(QMainWindow):
 
     def _add_session(self, session: DeviceSession) -> None:
         page = DeviceEditorPage(session.device, self)
+        page.addEntryRequested.connect(self._add_object_entry)
         index = self._tabs.addTab(page, session.identifier)
         self._pages[page] = session
         self._tabs.setCurrentIndex(index)
@@ -257,18 +228,10 @@ class EditorMainWindow(QMainWindow):
         self._update_context_widgets()
 
     def _update_context_widgets(self) -> None:
-        widget = self._tabs.currentWidget()
-        page = widget if isinstance(widget, DeviceEditorPage) else None
+        page = self._current_page()
         if page is None:
-            self._object_view.set_device(None)
-            self._property_view.display(None)
-            self._pdo_view.set_device(None)
-            self._report_view.set_report(None)
+            self._status.clearMessage()
             return
-        self._object_view.set_device(page.device)
-        self._object_view.select_first_row()
-        self._pdo_view.set_device(page.device)
-        self._report_view.set_report(page.device, page.issues)
         self._status.showMessage(self.tr("Issues: {count}").format(count=len(page.issues)), 3000)
 
     def _refresh_recent_files(self) -> None:
@@ -334,8 +297,9 @@ class EditorMainWindow(QMainWindow):
             Command(self.tr("New Device"), self._new_device, shortcut="Ctrl+N"),
             Command(self.tr("Open Device"), self._open_device_dialog, shortcut="Ctrl+O"),
             Command(self.tr("Export CANopenNode Sources"), self._export_current_session, shortcut="Ctrl+E"),
+            Command(self.tr("Add Object Entry"), self._add_object_entry, shortcut="Ctrl+Shift+N"),
             Command(self.tr("Toggle Dark Mode"), self._toggle_theme_action, shortcut="Ctrl+Shift+L"),
-            Command(self.tr("Show Validation Report"), self._focus_report_dock),
+            Command(self.tr("Show Validation Report"), self._show_validation_report_tab),
         ]
         return commands
 
@@ -375,6 +339,45 @@ class EditorMainWindow(QMainWindow):
             self.tr("Added missing mandatory objects: {indexes}").format(indexes=indexes), 7000
         )
 
+    def _current_page(self) -> DeviceEditorPage | None:
+        widget = self._tabs.currentWidget()
+        return widget if isinstance(widget, DeviceEditorPage) else None
+
+    def _current_session(self) -> DeviceSession | None:
+        page = self._current_page()
+        if page is None:
+            return None
+        return self._pages.get(page)
+
+    def _add_object_entry(self) -> None:
+        session = self._current_session()
+        if session is None:
+            return
+
+        dialog = AddObjectDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        request = dialog.request()
+        if request is None:
+            return
+
+        entry = AddObjectDialog.create_entry(request)
+        try:
+            self._network.insert_object(session.identifier, entry)
+        except ValueError as exc:
+            QMessageBox.warning(self, self.tr("Unable to add object"), str(exc))
+            return
+
+        page = self._tabs.currentWidget()
+        if isinstance(page, DeviceEditorPage):
+            page.set_device(session.device)
+        self._update_context_widgets()
+        self._status.showMessage(
+            self.tr("Added object 0x{index:04X}").format(index=entry.index),
+            5000,
+        )
+
     def _new_device(self) -> None:
         buttons = (
             QMessageBox.StandardButton.Yes
@@ -403,9 +406,11 @@ class EditorMainWindow(QMainWindow):
             5000,
         )
 
-    def _focus_report_dock(self) -> None:
-        self._report_dock.raise_()
-        self._report_dock.activateWindow()
+    def _show_validation_report_tab(self) -> None:
+        page = self._current_page()
+        if page is None:
+            return
+        page.show_validation_report()
 
     def _toggle_theme_action(self) -> None:
         if self._toggle_theme is not None:
