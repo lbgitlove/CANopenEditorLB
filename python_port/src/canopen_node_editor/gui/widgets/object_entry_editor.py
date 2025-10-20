@@ -6,15 +6,16 @@ from functools import partial
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QLineEdit,
-    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -59,13 +60,34 @@ class ObjectEntryEditorWidget(QWidget):
         entry_form.addRow(self.tr("Maximum"), self._entry_maximum)
         entry_form.addRow(self.tr("PDO Mapping"), self._entry_pdo)
 
-        self._sub_group = QGroupBox(self.tr("Sub-Indices"), self)
-        sub_layout = QHBoxLayout(self._sub_group)
+        self._sub_table = QTableWidget(self)
+        self._sub_table.setColumnCount(7)
+        self._sub_table.setHorizontalHeaderLabels(
+            [
+                self.tr("Sub"),
+                self.tr("Name"),
+                self.tr("Data Type"),
+                self.tr("SDO"),
+                self.tr("PDO"),
+                self.tr("SRDO"),
+                self.tr("Default Value"),
+            ]
+        )
+        self._sub_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._sub_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self._sub_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._sub_table.setAlternatingRowColors(True)
+        self._sub_table.verticalHeader().setVisible(False)
+        header = self._sub_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for column in range(2, self._sub_table.columnCount()):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
 
-        self._sub_list = QListWidget(self._sub_group)
-        self._sub_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        sub_layout.addWidget(self._sub_list)
-
+        self._sub_group = QGroupBox(self.tr("Sub-Index Details"), self)
         self._sub_form_container = QWidget(self._sub_group)
         self._sub_form = QFormLayout(self._sub_form_container)
         self._sub_index_label = QLabel("-", self._sub_form_container)
@@ -88,11 +110,20 @@ class ObjectEntryEditorWidget(QWidget):
         self._sub_form.addRow(self.tr("Maximum"), self._sub_maximum)
         self._sub_form.addRow(self.tr("PDO Mapping"), self._sub_pdo)
 
-        sub_layout.addWidget(self._sub_form_container, stretch=1)
+        sub_group_layout = QVBoxLayout(self._sub_group)
+        sub_group_layout.setContentsMargins(8, 8, 8, 8)
+        sub_group_layout.addWidget(self._sub_form_container)
+
+        sub_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        sub_splitter.setChildrenCollapsible(False)
+        sub_splitter.addWidget(self._sub_table)
+        sub_splitter.addWidget(self._sub_group)
+        sub_splitter.setStretchFactor(0, 2)
+        sub_splitter.setStretchFactor(1, 3)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._entry_group)
-        layout.addWidget(self._sub_group)
+        layout.addWidget(sub_splitter, stretch=1)
 
         self._populate_enum_combo(self._entry_object_type, ObjectType, allow_none=True)
         self._populate_enum_combo(self._entry_data_type, DataType, allow_none=True)
@@ -116,12 +147,14 @@ class ObjectEntryEditorWidget(QWidget):
         if entry is None:
             self._clear_entry_fields()
             self._set_entry_enabled(False)
-            self._sub_list.clear()
+            self._sub_table.setRowCount(0)
             self._load_sub_object(None)
+            self._sub_table.setEnabled(False)
             self._updating_entry = False
             return
 
         self._set_entry_enabled(True)
+        self._sub_table.setEnabled(True)
         self._entry_name.setText(entry.name or "")
         self._set_combo_value(self._entry_object_type, entry.object_type)
         self._set_combo_value(self._entry_data_type, entry.data_type)
@@ -132,20 +165,30 @@ class ObjectEntryEditorWidget(QWidget):
         self._entry_maximum.setText(entry.maximum or "")
         self._set_combo_value(self._entry_pdo, entry.pdo_mapping)
 
-        self._sub_list.blockSignals(True)
-        self._sub_list.clear()
-        for subindex, sub in sorted(entry.sub_objects.items()):
-            label = self.tr("{index:02X} – {name}").format(
-                index=subindex,
-                name=sub.name or self.tr("SubIndex"),
-            )
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, sub)
-            self._sub_list.addItem(item)
-        self._sub_list.blockSignals(False)
+        self._sub_table.blockSignals(True)
+        self._sub_table.setRowCount(0)
+        for row, (subindex, sub) in enumerate(sorted(entry.sub_objects.items())):
+            self._sub_table.insertRow(row)
+            index_item = QTableWidgetItem(f"{subindex:02X}")
+            index_item.setData(Qt.UserRole, sub)
+            name_item = QTableWidgetItem(sub.name or self.tr("SubIndex"))
+            type_item = QTableWidgetItem(sub.data_type.name)
+            sdo_item = QTableWidgetItem(sub.access_type.name)
+            pdo_text = sub.pdo_mapping.name if sub.pdo_mapping else ""
+            pdo_item = QTableWidgetItem(pdo_text)
+            srdo_item = QTableWidgetItem("")
+            default_item = QTableWidgetItem(sub.default or "")
 
-        if self._sub_list.count() > 0:
-            self._sub_list.setCurrentRow(0)
+            for column, item in enumerate(
+                (index_item, name_item, type_item, sdo_item, pdo_item, srdo_item, default_item)
+            ):
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._sub_table.setItem(row, column, item)
+        self._sub_table.blockSignals(False)
+
+        if self._sub_table.rowCount() > 0:
+            self._sub_table.selectRow(0)
+            self._load_sub_object(self._sub_object_for_row(0))
         else:
             self._load_sub_object(None)
 
@@ -180,7 +223,10 @@ class ObjectEntryEditorWidget(QWidget):
         )
 
     def _bind_sub_signals(self) -> None:
-        self._sub_list.currentItemChanged.connect(self._on_sub_selection_changed)
+        selection_model = self._sub_table.selectionModel()
+        if selection_model is not None:
+            selection_model.selectionChanged.connect(self._on_sub_selection_changed)
+        self._sub_table.itemSelectionChanged.connect(self._on_sub_selection_changed)
         self._sub_name.textEdited.connect(self._on_sub_name_changed)
         self._sub_data_type.currentIndexChanged.connect(
             partial(self._on_sub_combo_changed, self._sub_data_type, "data_type")
@@ -226,13 +272,20 @@ class ObjectEntryEditorWidget(QWidget):
         self.entryChanged.emit(self._entry)
 
     # ------------------------------------------------------------------
-    def _on_sub_selection_changed(
-        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
-    ) -> None:
-        sub = current.data(Qt.UserRole) if current is not None else None
-        if not isinstance(sub, SubObject):
-            sub = None
-        self._load_sub_object(sub)
+    def _on_sub_selection_changed(self, selected=None, _deselected=None) -> None:
+        if selected is not None:
+            indexes = selected.indexes()
+        else:
+            selection_model = self._sub_table.selectionModel()
+            if selection_model is None:
+                indexes = []
+            else:
+                indexes = selection_model.selectedIndexes()
+        if not indexes:
+            self._load_sub_object(None)
+            return
+        row = indexes[0].row()
+        self._load_sub_object(self._sub_object_for_row(row))
 
     def _load_sub_object(self, sub: SubObject | None) -> None:
         self._current_sub = sub
@@ -268,7 +321,7 @@ class ObjectEntryEditorWidget(QWidget):
             return
         self._current_sub.name = text.strip() or None
         self.subEntryChanged.emit(self._entry, self._current_sub)
-        self._refresh_sub_label(self._current_sub)
+        self._refresh_sub_row(self._current_sub)
 
     def _on_sub_text_changed(self, field: str, widget: QLineEdit) -> None:
         if self._entry is None or self._current_sub is None or self._updating_sub:
@@ -276,6 +329,7 @@ class ObjectEntryEditorWidget(QWidget):
         value = widget.text().strip() or None
         setattr(self._current_sub, field, value)
         self.subEntryChanged.emit(self._entry, self._current_sub)
+        self._refresh_sub_row(self._current_sub)
 
     def _on_sub_combo_changed(self, combo: QComboBox, field: str) -> None:
         if self._entry is None or self._current_sub is None or self._updating_sub:
@@ -283,6 +337,7 @@ class ObjectEntryEditorWidget(QWidget):
         value = combo.currentData(Qt.UserRole)
         setattr(self._current_sub, field, value)
         self.subEntryChanged.emit(self._entry, self._current_sub)
+        self._refresh_sub_row(self._current_sub)
 
     # ------------------------------------------------------------------
     def _populate_enum_combo(self, combo: QComboBox, enum_cls, *, allow_none: bool) -> None:
@@ -305,18 +360,28 @@ class ObjectEntryEditorWidget(QWidget):
             combo.setCurrentIndex(0 if combo.count() else -1)
             combo.blockSignals(False)
 
-    def _refresh_sub_label(self, sub: SubObject) -> None:
-        for row in range(self._sub_list.count()):
-            item = self._sub_list.item(row)
+    def _refresh_sub_row(self, sub: SubObject) -> None:
+        for row in range(self._sub_table.rowCount()):
+            item = self._sub_table.item(row, 0)
             if item is None:
                 continue
             stored = item.data(Qt.UserRole)
             if stored is sub:
-                label = self.tr("{index:02X} – {name}").format(
-                    index=sub.key.subindex,
-                    name=sub.name or self.tr("SubIndex"),
-                )
-                item.setText(label)
+                name_item = self._sub_table.item(row, 1)
+                if name_item is not None:
+                    name_item.setText(sub.name or self.tr("SubIndex"))
+                type_item = self._sub_table.item(row, 2)
+                if type_item is not None:
+                    type_item.setText(sub.data_type.name)
+                access_item = self._sub_table.item(row, 3)
+                if access_item is not None:
+                    access_item.setText(sub.access_type.name)
+                pdo_item = self._sub_table.item(row, 4)
+                if pdo_item is not None:
+                    pdo_item.setText(sub.pdo_mapping.name if sub.pdo_mapping else "")
+                default_item = self._sub_table.item(row, 6)
+                if default_item is not None:
+                    default_item.setText(sub.default or "")
                 break
 
     def _format_enum(self, member) -> str:
@@ -356,3 +421,12 @@ class ObjectEntryEditorWidget(QWidget):
 
     def current_subobject(self) -> SubObject | None:
         return self._current_sub
+
+    def _sub_object_for_row(self, row: int) -> SubObject | None:
+        if row < 0 or row >= self._sub_table.rowCount():
+            return None
+        item = self._sub_table.item(row, 0)
+        if item is None:
+            return None
+        data = item.data(Qt.UserRole)
+        return data if isinstance(data, SubObject) else None
