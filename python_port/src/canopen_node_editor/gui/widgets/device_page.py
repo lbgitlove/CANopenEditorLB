@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
+    QSplitter,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -36,18 +36,25 @@ class DeviceEditorPage(QWidget):
         layout.addWidget(self._tabs)
 
         self._object_page = QWidget(self)
-        object_layout = QHBoxLayout(self._object_page)
-        object_layout.setContentsMargins(0, 0, 0, 0)
+        object_splitter = QSplitter(self._object_page)
+        object_splitter.setOrientation(Qt.Orientation.Horizontal)
+        object_splitter.setChildrenCollapsible(False)
 
         self.object_dictionary = ObjectDictionaryWidget(
             include_subindices=False,
             editable=False,
             show_add_button=True,
         )
-        object_layout.addWidget(self.object_dictionary, stretch=1)
+        object_splitter.addWidget(self.object_dictionary)
 
         self.object_editor = ObjectEntryEditorWidget(self._object_page)
-        object_layout.addWidget(self.object_editor, stretch=2)
+        object_splitter.addWidget(self.object_editor)
+        object_splitter.setStretchFactor(0, 1)
+        object_splitter.setStretchFactor(1, 2)
+
+        object_layout = QVBoxLayout(self._object_page)
+        object_layout.setContentsMargins(0, 0, 0, 0)
+        object_layout.addWidget(object_splitter)
 
         self._tabs.addTab(self._object_page, self.tr("Object Dictionary"))
 
@@ -87,11 +94,8 @@ class DeviceEditorPage(QWidget):
         self.object_dictionary.set_device(self.device)
         if current_entry is not None:
             self.object_dictionary.select_entry(current_entry)
-        selection_model = self.object_dictionary.tree().selectionModel()
-        if selection_model is None or not selection_model.hasSelection():
-            if self.object_dictionary.model().rowCount() > 0:
-                self.object_dictionary.select_first_row()
-            else:
+        if not self.object_dictionary.current_entry():
+            if not self.object_dictionary.select_first_entry():
                 self.object_editor.set_entry(None)
         self.pdo_editor.set_device(self.device)
         self.report_view.set_report(self.device, self.issues)
